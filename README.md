@@ -1,111 +1,67 @@
-# Amen 🤖✝️
+# Amen SportyBet Booking Optimizer
 
-Production-ready, highly scalable AI-powered Telegram Bot architecture built with Python 3.12+, FastAPI, Aiogram 3, PostgreSQL (SQLAlchemy 2.0 Async), Redis, and APScheduler.
+This repository implements Phase 1 of the Amen Telegram Mini App for SportyBet football bookings.
 
-## 🏛 Clean Architecture Overview
+The current implementation includes:
+- A FastAPI backend with SportyBet booking retrieval and rebooking endpoints
+- A React + Vite frontend for fetching a booking, displaying football selections ordered by kickoff time, removing selections, and generating a new booking
+- Backend-only SportyBet API integration support via server-side environment variables
 
-Amen follows SOLID design principles and Clean Architecture to ensure strict separation of concerns, testability, and high maintainability:
+## Current Architecture
 
-```text
-[ Telegram User ] <---> [ Aiogram Handlers & Keyboards ]
-                              │
-[ Web API Client ] <--> [ FastAPI Routes & Middleware ]
-                              │
-                        [ Business Services Layer ]
-                              │
-                        [ Repository Data Access Layer ]
-                              │
-                ┌─────────────┴─────────────┐
-                ▼                           ▼
-        [ PostgreSQL DB ]           [ Redis / Storage ]
+- `backend/app/main.py` - FastAPI application entrypoint
+- `backend/app/api/bookings.py` - booking endpoints
+- `backend/app/services/sportybet.py` - SportyBet service wrapper and mock fallback
+- `backend/app/schemas/booking.py` - Pydantic request/response models
+- `frontend/src/App.tsx` - Phase 1 dashboard shell
+- `frontend/src/components/DashboardPage.tsx` - booking fetch and rebook UI
+- `frontend/src/lib/api.ts` - frontend API client
+
+## Backend API
+
+Available endpoints:
+- `GET /api/v1/bookings/{booking_code}` — fetch a SportyBet booking
+- `POST /api/v1/bookings/rebook` — remove selections and generate a new booking
+- `GET /health` — health check
+
+## Environment Setup
+
+### Backend
+Create `.env` from `.env.example` and set:
+```env
+SPORTYBET_API_KEY=your_sportybet_api_key_here
+SPORTYBET_API_BASE_URL=https://api.sportybet.example
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+CORS_ORIGINS=http://localhost:5173
 ```
 
-### Module Blueprint
+### Frontend
+Create `frontend/.env` from `frontend/.env.example` and set:
+```env
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+```
 
-- **`app/bot/`**: Telegram Bot interface (handlers, custom keyboards, state management, middlewares).
-- **`app/api/`**: REST API endpoints, Webhook handlers, and FastAPI dependency injectors.
-- **`app/core/`**: Central application configurations (`pydantic-settings`), logging, security, and global exception handlers.
-- **`app/database/`**: Async SQLAlchemy database engine, session lifecycle, and base declarations.
-- **`app/models/`**: SQLAlchemy 2.0 declarative database ORM models.
-- **`app/repositories/`**: Generic async CRUD data access layer abstraction (`BaseRepository`).
-- **`app/services/`**: Core business domain logic, isolated from transport protocols (HTTP/Telegram).
-- **`app/schemas/`**: Pydantic v2 data transfer objects (DTOs) and request/response models.
-- **`app/collectors/`**: Data ingestion & external API integration collectors.
-- **`app/ml/`**: Machine Learning inference contracts and model wrappers.
-- **`app/predictions/`**: Prediction domain logic interface placeholders.
-- **`app/scheduler/`**: Async background job scheduler (`APScheduler`).
-- **`app/prompts/`**: AI Prompt management & template engine.
-- **`app/middleware/`**: Custom HTTP middlewares for FastAPI.
-- **`app/utils/`**: Shared helper functions.
+## Running Locally
 
----
-
-## 🛠 Tech Stack
-
-- **Language**: Python 3.12+
-- **Web Framework**: FastAPI
-- **Telegram Bot Framework**: Aiogram 3.x
-- **Database**: PostgreSQL 16 + SQLAlchemy 2.0 (AsyncIO) + Alembic
-- **Caching & FSM**: Redis 7
-- **Scheduler**: APScheduler
-- **Validation & Settings**: Pydantic v2 & `pydantic-settings`
-- **Containerization**: Docker & Docker Compose
-- **Dependency Management**: Poetry / Pyproject.toml
-
----
-
-## 🚀 Quick Start with Docker
-
-1. **Clone the repository and prepare `.env`**:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. **Configure your `.env`**:
-   Insert your Telegram Bot Token from [@BotFather](https://t.me/BotFather):
-   ```env
-   BOT_TOKEN=your_actual_bot_token_here
-   ```
-
-3. **Spin up using Docker Compose**:
-   ```bash
-   docker-compose up -d --build
-   ```
-
-4. **Verify Health**:
-   Open http://localhost:8000/health in your browser or run:
-   ```bash
-   curl http://localhost:8000/health
-   ```
-
----
-
-## 💻 Local Development Setup (Without Docker)
-
-1. **Install Dependencies**:
-   ```bash
-   poetry install
-   ```
-
-2. **Run PostgreSQL & Redis**:
-   Ensure PostgreSQL and Redis services are running locally.
-
-3. **Run Database Migrations**:
-   ```bash
-   poetry run alembic upgrade head
-   ```
-
-4. **Start the Application**:
-   ```bash
-   poetry run python -m app.main
-   ```
-
----
-
-## 🧪 Testing & Code Quality
-
-Run tests and linters:
+### Backend
 ```bash
-poetry run ruff check .
-poetry run pytest
+cd backend
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## Build Verification
+
+- Frontend build passed successfully with `npm run build`
+- Backend Python source compiles cleanly with `python -m compileall app`
+
+## Notes
+
+- The backend currently uses mock SportyBet data when `SPORTYBET_API_BASE_URL` or `SPORTYBET_API_KEY` are not configured.
+- The app is limited to football booking fetch, selection removal, and rebook generation to satisfy Phase 1 requirements.

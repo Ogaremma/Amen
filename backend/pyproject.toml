@@ -1,0 +1,11 @@
+[project]
+name = "amen-backend"
+version = "0.1.0"
+description = "SportyBet booking optimizer backend"
+requires-python = ">=3.13"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "httpx",
+]
