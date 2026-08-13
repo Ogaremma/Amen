@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class BookingSelection(BaseModel):
@@ -17,11 +18,16 @@ class BookingSelection(BaseModel):
     kickoff: datetime = Field(..., description="Full timezone-aware kickoff datetime (UTC)")
     kickoff_date: str = Field(..., description="Kickoff date, YYYY-MM-DD (UTC)")
     kickoff_time: str = Field(..., description="Kickoff time, HH:MM 24-hour (UTC)")
+    local_kickoff_date: str = Field(..., description="Kickoff date in Africa/Lagos, YYYY-MM-DD")
+    local_kickoff_time: str = Field(..., description="Kickoff time in Africa/Lagos, HH:MM")
     market: str = Field(..., description="Selected market description")
     outcome: str = Field(..., description="Selected outcome description")
     odds: float | None = Field(None, description="Odds for the selected outcome")
     specifier: str | None = Field(None, description="Market specifier, e.g. total=8.5")
     status: str | None = Field(None, description="Match status reported by SportyBet")
+    game_status: Literal["upcoming", "live", "ended"] = Field(
+        ..., description="Normalized game status for the Amen ticket UI"
+    )
 
 
 class BookingResponse(BaseModel):
@@ -31,6 +37,9 @@ class BookingResponse(BaseModel):
     total_selections: int = Field(..., description="Number of selections returned")
     total_odds: float | None = Field(
         None, description="Total odds as reported by SportyBet (displayTotalOdds)"
+    )
+    remaining_odds: float = Field(
+        ..., description="Product of valid odds for upcoming selections only"
     )
     selections: list[BookingSelection] = Field(
         default_factory=list,

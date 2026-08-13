@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from fastapi import HTTPException
@@ -17,6 +20,64 @@ settings = get_settings()
 
 # SportyBet success business code.
 _BIZ_CODE_OK = 10000
+try:
+    _LAGOS = ZoneInfo("Africa/Lagos")
+except ZoneInfoNotFoundError:
+    # Windows Python installations may not ship the IANA database. Nigeria has
+    # no daylight-saving transitions, so this remains an exact aware fallback.
+    _LAGOS = timezone(timedelta(hours=1), name="Africa/Lagos")
+_FALLBACK_LIVE_WINDOW = timedelta(hours=3)
+
+
+def determine_game_status(
+    raw_status: Any, kickoff: datetime, now: datetime | None = None
+) -> str:
+    """Normalize SportyBet status, with a conservative time fallback."""
+    normalized = " ".join(str(raw_status or "").strip().lower().replace("_", " ").split())
+    upcoming = {"not start", "not started", "scheduled", "upcoming", "pre match", "prematch"}
+    live = {"live", "in progress", "in play", "started", "playing"}
+    ended = {"ended", "finished", "complete", "completed", "closed", "cancelled", "canceled"}
+    if normalized in upcoming:
+        return "upcoming"
+    if normalized in live:
+        return "live"
+    if normalized in ended:
+        return "ended"
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    if current < kickoff:
+        return "upcoming"
+    if current < kickoff + _FALLBACK_LIVE_WINDOW:
+        return "live"
+    return "ended"
+
+
+def calculate_remaining_odds(selections: list[BookingSelection]) -> float:
+    """Multiply finite, positive odds for upcoming games only."""
+    upcoming = [selection for selection in selections if selection.game_status == "upcoming"]
+    if not upcoming:
+        return 0.0
+
+    result = Decimal("1")
+    valid_count = 0
+    for selection in upcoming:
+        if selection.odds is None:
+            continue
+        try:
+            odds = Decimal(str(selection.odds))
+        except (InvalidOperation, ValueError):
+            continue
+        if not odds.is_finite() or odds <= 0:
+            continue
+        result *= odds
+        valid_count += 1
+
+    if valid_count == 0:
+        return 0.0
+    converted = float(result)
+    return converted if math.isfinite(converted) else 0.0
 
 
 def _to_float(value: Any) -> float | None:
@@ -65,7 +126,9 @@ def _match_outcome(market: dict[str, Any], selection: dict[str, Any]) -> dict[st
     return None
 
 
-def _build_selection(selection: dict[str, Any], event: dict[str, Any]) -> BookingSelection | None:
+def _build_selection(
+    selection: dict[str, Any], event: dict[str, Any], now: datetime | None = None
+) -> BookingSelection | None:
     """Resolve one ticket selection against its event outcome into a clean model.
 
     Returns None (and logs the reason) when the selection cannot be resolved,
@@ -102,6 +165,8 @@ def _build_selection(selection: dict[str, Any], event: dict[str, Any]) -> Bookin
     category = sport.get("category", {}) or {}
     tournament = category.get("tournament", {}) or {}
     specifier = selection.get("specifier") or None
+    local_kickoff = kickoff.astimezone(_LAGOS)
+    raw_status = event.get("matchStatus")
 
     return BookingSelection(
         id=str(event_id),
@@ -113,15 +178,20 @@ def _build_selection(selection: dict[str, Any], event: dict[str, Any]) -> Bookin
         kickoff=kickoff,
         kickoff_date=kickoff.strftime("%Y-%m-%d"),
         kickoff_time=kickoff.strftime("%H:%M"),
+        local_kickoff_date=local_kickoff.strftime("%Y-%m-%d"),
+        local_kickoff_time=local_kickoff.strftime("%H:%M"),
         market=market.get("desc") or market.get("name") or "Unknown market",
         outcome=picked.get("desc") or "Unknown outcome",
         odds=_to_float(picked.get("odds")),
         specifier=specifier,
-        status=event.get("matchStatus"),
+        status=raw_status,
+        game_status=determine_game_status(raw_status, kickoff, now),
     )
 
 
-def parse_booking(booking_code: str, payload: dict[str, Any]) -> BookingResponse:
+def parse_booking(
+    booking_code: str, payload: dict[str, Any], now: datetime | None = None
+) -> BookingResponse:
     """Turn a raw SportyBet share response into a clean, sorted BookingResponse.
 
     Pure function (no I/O) so it can be unit-tested with mocked payloads.
@@ -155,7 +225,7 @@ def parse_booking(booking_code: str, payload: dict[str, Any]) -> BookingResponse
         if event is None:
             logger.warning("No outcome found for selection event %s", selection.get("eventId"))
             continue
-        built = _build_selection(selection, event)
+        built = _build_selection(selection, event, now)
         if built is not None:
             resolved.append(built)
 
@@ -166,6 +236,7 @@ def parse_booking(booking_code: str, payload: dict[str, Any]) -> BookingResponse
         booking_code=data.get("shareCode") or booking_code,
         total_selections=len(resolved),
         total_odds=_to_float(ticket.get("displayTotalOdds")),
+        remaining_odds=calculate_remaining_odds(resolved),
         selections=resolved,
     )
 

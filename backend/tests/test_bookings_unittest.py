@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services import sportybet
-from app.services.sportybet import get_booking, parse_booking
+from app.services.sportybet import determine_game_status, get_booking, parse_booking
 
 
 def _ms(dt: datetime) -> int:
@@ -207,6 +207,71 @@ class ParseBookingTests(unittest.TestCase):
         self.assertEqual(a.kickoff, EVENT_A_START)
         self.assertEqual(a.kickoff_date, "2026-08-11")
         self.assertEqual(a.kickoff_time, "08:00")
+        self.assertEqual(a.local_kickoff_date, "2026-08-11")
+        self.assertEqual(a.local_kickoff_time, "09:00")
+
+    def test_lagos_conversion_can_move_event_to_next_date(self):
+        result = parse_booking("HW7UDH", make_payload())
+        b = next(s for s in result.selections if s.event_id == "sr:match:1002")
+        self.assertEqual(b.kickoff_date, "2026-08-10")
+        self.assertEqual(b.kickoff_time, "22:00")
+        self.assertEqual(b.local_kickoff_date, "2026-08-10")
+        self.assertEqual(b.local_kickoff_time, "23:00")
+
+    def test_local_date_grouping_preserves_chronological_order_across_midnight(self):
+        payload = make_payload()
+        payload["data"]["outcomes"][1]["estimateStartTime"] = _ms(
+            datetime(2026, 8, 10, 23, 30, tzinfo=timezone.utc)
+        )
+        result = parse_booking("HW7UDH", payload)
+        self.assertEqual(result.selections[0].local_kickoff_date, "2026-08-11")
+        self.assertEqual(result.selections[0].local_kickoff_time, "00:30")
+        self.assertEqual([s.kickoff for s in result.selections], sorted(s.kickoff for s in result.selections))
+
+    def test_explicit_statuses_are_normalized(self):
+        kickoff = datetime(2026, 8, 13, 12, tzinfo=timezone.utc)
+        self.assertEqual(determine_game_status("Not start", kickoff), "upcoming")
+        self.assertEqual(determine_game_status("In Progress", kickoff), "live")
+        self.assertEqual(determine_game_status("Finished", kickoff), "ended")
+
+    def test_status_fallback_uses_timezone_aware_kickoff(self):
+        kickoff = datetime(2026, 8, 13, 12, tzinfo=timezone.utc)
+        self.assertEqual(determine_game_status(None, kickoff, datetime(2026, 8, 13, 11, 59, tzinfo=timezone.utc)), "upcoming")
+        self.assertEqual(determine_game_status(None, kickoff, kickoff), "live")
+        self.assertEqual(determine_game_status(None, kickoff, datetime(2026, 8, 13, 15, tzinfo=timezone.utc)), "ended")
+
+    def test_remaining_odds_include_only_upcoming_selections(self):
+        payload = make_payload()
+        payload["data"]["outcomes"][0]["matchStatus"] = "Live"
+        result = parse_booking("HW7UDH", payload)
+        upcoming_odds = [s.odds for s in result.selections if s.game_status == "upcoming"]
+        expected = 1.0
+        for odds in upcoming_odds:
+            expected *= odds
+        self.assertAlmostEqual(result.remaining_odds, expected)
+
+    def test_remaining_odds_zero_with_no_upcoming_selections(self):
+        payload = make_payload()
+        for outcome in payload["data"]["outcomes"]:
+            outcome["matchStatus"] = "Finished"
+        self.assertEqual(parse_booking("HW7UDH", payload).remaining_odds, 0.0)
+
+    def test_remaining_odds_ignore_missing_and_invalid_odds(self):
+        payload = make_payload()
+        markets = payload["data"]["outcomes"][0]["markets"]
+        markets[0]["outcomes"][0]["odds"] = None
+        markets[1]["outcomes"][0]["odds"] = "not-a-number"
+        result = parse_booking("HW7UDH", payload)
+        self.assertGreaterEqual(result.remaining_odds, 0.0)
+
+    def test_remaining_odds_support_large_finite_products(self):
+        payload = make_payload()
+        for outcome in payload["data"]["outcomes"]:
+            for market in outcome["markets"]:
+                for picked in market["outcomes"]:
+                    picked["odds"] = "1000000"
+        result = parse_booking("HW7UDH", payload)
+        self.assertTrue(result.remaining_odds > 1_000_000)
 
     def test_sorted_by_complete_datetime_across_dates(self):
         # Even though event B has a later clock time (22:00), it is on the
