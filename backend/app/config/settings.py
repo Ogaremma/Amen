@@ -52,6 +52,11 @@ class Settings(BaseSettings):
         validation_alias="TELEGRAM_AUTH_MAX_AGE",
     )
 
+    history_database_path: str = Field(
+        default="amen_history.sqlite3",
+        validation_alias="HISTORY_DATABASE_PATH",
+    )
+
     # ---------------------------------------------------------
     # CORS
     # ---------------------------------------------------------

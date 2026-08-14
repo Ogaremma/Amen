@@ -14,8 +14,9 @@ import {
   RefreshCw,
   Trash2,
   X,
+  History as HistoryIcon,
 } from 'lucide-react'
-import { fetchBookingByCode, removeSelectedGames } from '../lib/api'
+import { fetchBookingByCode, fetchHistory, removeSelectedGames, type HistoryItem } from '../lib/api'
 import type { BookingResponse, BookingSelection } from '../types/booking'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
@@ -88,6 +89,8 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [view, setView] = useState<'ticket' | 'ended'>('ticket')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<HistoryItem[]>([])
 
   const activeSelections = useMemo(
     () => booking ? sortChronologically(booking.selections.filter((selection) => selection.game_status !== 'ended')) : [],
@@ -123,6 +126,18 @@ export function DashboardPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const openHistory = async () => {
+    try { setHistory(await fetchHistory()); setHistoryOpen(true) }
+    catch (err) { setError(err instanceof Error ? err.message : 'Unable to load history') }
+  }
+
+  const reopenHistory = async (code: string) => {
+    setHistoryOpen(false); setBookingCodeInput(code); setLoading(true)
+    try { const loaded = await fetchBookingByCode(code); setOriginalBookingCode(code); setBooking(loaded); setSelectedEventIds(new Set()); setView('ticket') }
+    catch (err) { setError(err instanceof Error ? err.message : 'Unable to load ticket') }
+    finally { setLoading(false) }
   }
 
   const goBack = () => {
@@ -303,6 +318,7 @@ export function DashboardPage() {
   ))
 
   if (!booking) {
+    if (historyOpen) return <div className="mx-auto max-w-3xl space-y-4"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setHistoryOpen(false)} aria-label="Back to booking input"><ArrowLeft className="h-4 w-4" /><span className="ml-1.5">Back</span></Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">History</h1></header>{history.length === 0 ? <Card className="p-4 text-sm text-slate-300">No booking codes yet.</Card> : history.map((item) => <Card key={item.id} className="flex items-center gap-3 p-4"><button type="button" className="min-w-0 flex-1 text-left" onClick={() => reopenHistory(item.booking_code)}><p className="font-semibold tracking-wide text-white">{item.booking_code}</p><p className="mt-1 text-xs text-slate-400">Loaded {new Date(item.loaded_at).toLocaleString()}</p></button><button type="button" aria-label={`Copy ${item.booking_code}`} onClick={() => navigator.clipboard.writeText(item.booking_code)} className="rounded-xl border border-white/10 p-2 text-slate-300"><Clipboard className="h-4 w-4" /></button></Card>)}</div>
     return (
       <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
         <Card className="mx-auto max-w-2xl">
@@ -312,7 +328,7 @@ export function DashboardPage() {
               <h1 className="mt-2 text-3xl font-semibold text-white">Load your ticket</h1>
               <p className="mt-2 text-sm text-slate-300">Enter a SportyBet booking code to view and optimize it.</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
               <Input
                 aria-label="SportyBet booking code"
                 value={bookingCodeInput}
@@ -321,6 +337,7 @@ export function DashboardPage() {
                 placeholder="Booking code (e.g. HW7UDH)"
                 disabled={loading}
               />
+              <Button variant="outline" size="lg" onClick={openHistory} disabled={loading} aria-label="Open booking history"><HistoryIcon className="h-4 w-4" /><span className="ml-1.5">History</span></Button>
               <Button size="lg" onClick={loadTicket} disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {loading ? 'Loading ticket…' : 'Load Ticket'}

@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Depends, Path
 
 from app.schemas.booking import BookingResponse, RemoveSelectedRequest
 from app.services.sportybet import get_booking, rebook_without_events
+from app.services.history_store import history_store
+from app.services.telegram_auth import TelegramUser
+from app.services.telegram_identity import optional_verified_telegram_user
 
 router = APIRouter(prefix="/api/v1/bookings", tags=["bookings"])
 
@@ -13,8 +16,12 @@ router = APIRouter(prefix="/api/v1/bookings", tags=["bookings"])
 )
 async def fetch_booking(
     booking_code: str = Path(..., description="SportyBet booking / share code, e.g. HW7UDH"),
+    user: TelegramUser | None = Depends(optional_verified_telegram_user),
 ) -> BookingResponse:
-    return await get_booking(booking_code)
+    booking = await get_booking(booking_code)
+    if user is not None:
+        history_store.upsert(user.telegram_user_id, booking.booking_code, booking.total_selections, booking.remaining_odds)
+    return booking
 
 
 @router.post(

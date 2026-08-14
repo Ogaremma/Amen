@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.bookings import router as bookings_router
 from app.api.telegram import router as telegram_router
+from app.api.history import router as history_router
 from app.config.settings import get_settings
 
 settings = get_settings()
@@ -22,6 +23,7 @@ app.add_middleware(
 
 app.include_router(bookings_router)
 app.include_router(telegram_router)
+app.include_router(history_router)
 
 
 @app.get("/health", summary="Health check")

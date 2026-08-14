@@ -6,6 +6,11 @@ function buildUrl(path: string) {
   return `${BASE_URL}${path}`
 }
 
+function telegramHeaders(): HeadersInit {
+  const initData = typeof window !== 'undefined' ? window.Telegram?.WebApp?.initData : ''
+  return initData ? { 'X-Telegram-Init-Data': initData } : {}
+}
+
 async function checkResponse(response: Response): Promise<BookingResponse> {
   const text = await response.text()
   let body: unknown = null
@@ -27,7 +32,7 @@ async function checkResponse(response: Response): Promise<BookingResponse> {
 }
 
 export async function fetchBookingByCode(bookingCode: string): Promise<BookingResponse> {
-  const response = await fetch(buildUrl(`/bookings/${encodeURIComponent(bookingCode)}`))
+  const response = await fetch(buildUrl(`/bookings/${encodeURIComponent(bookingCode)}`), { headers: telegramHeaders() })
   return checkResponse(response)
 }
 
@@ -88,4 +93,13 @@ export async function authenticateTelegram(initData: string): Promise<TelegramAu
     throw new Error(detail)
   }
   return body as TelegramAuthResult
+}
+
+export interface HistoryItem { id: number; booking_code: string; loaded_at: string; selection_count: number | null; remaining_odds: number | null }
+
+export async function fetchHistory(): Promise<HistoryItem[]> {
+  const response = await fetch(buildUrl('/history'), { headers: telegramHeaders() })
+  const body = await response.json()
+  if (!response.ok) throw new Error(body?.detail || 'Unable to load history')
+  return body as HistoryItem[]
 }

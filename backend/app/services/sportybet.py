@@ -131,11 +131,16 @@ def _match_market(outcome: dict[str, Any], selection: dict[str, Any]) -> dict[st
                 return market
         return None
 
-    # No specifier on the selection: prefer a specifier-less market, else first id match.
-    for market in id_matches:
-        if not market.get("specifier"):
-            return market
-    return id_matches[0]
+    # An absent specifier is only safe when SportyBet returned exactly one
+    # candidate (or exactly one specifier-less candidate). Never guess by
+    # taking the first market when several candidates remain.
+    no_specifier = [market for market in id_matches if not market.get("specifier")]
+    if len(no_specifier) == 1:
+        return no_specifier[0]
+    if len(id_matches) == 1:
+        return id_matches[0]
+    logger.warning("Ambiguous market %s for event %s without specifier", market_id, selection.get("eventId"))
+    return None
 
 
 def _match_outcome(market: dict[str, Any], selection: dict[str, Any]) -> dict[str, Any] | None:
