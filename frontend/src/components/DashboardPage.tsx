@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clipboard,
   Clock3,
+  CircleHelp,
   Loader2,
   RefreshCw,
   Trash2,
@@ -47,6 +48,14 @@ const STATUS = {
   upcoming: { label: 'Upcoming', classes: 'border-sky-400/20 bg-sky-400/10 text-sky-200' },
   live: { label: 'Live', classes: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' },
   ended: { label: 'Ended', classes: 'border-red-400/25 bg-red-400/10 text-red-300' },
+} as const
+
+const RESULT = {
+  pending: { label: 'Pending', classes: 'text-orange-400', icon: null },
+  won: { label: 'Won', classes: 'text-emerald-400', icon: Check },
+  lost: { label: 'Lost', classes: 'text-red-400', icon: X },
+  void: { label: 'Void', classes: 'text-slate-300', icon: CircleHelp },
+  unknown: { label: 'Unknown', classes: 'text-slate-500', icon: CircleHelp },
 } as const
 
 interface DateGroup { date: string; selections: BookingSelection[] }
@@ -244,12 +253,24 @@ export function DashboardPage() {
         {group.selections.map((selection) => {
           const selected = selectedEventIds.has(selection.event_id)
           const status = STATUS[selection.game_status]
+          const result = RESULT[selection.result_status]
+          const ResultIcon = result.icon
           return (
             <Card key={selection.event_id} data-selected={selected ? 'true' : 'false'} className={`relative p-3 pb-5 pr-12 transition ${selected ? 'border-red-400/60 bg-red-500/10' : ''}`}>
               <div className="min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-accent"><Clock3 className="h-3.5 w-3.5" />{formatTime12(selection.local_kickoff_time)}</span>
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.classes}`}>{status.label}</span>
+                  <span className="flex items-center gap-2">
+                    <span
+                      role="img"
+                      aria-label={`Bet result: ${result.label}`}
+                      title={`Bet result: ${result.label}`}
+                      className={`inline-flex h-4 w-4 items-center justify-center ${result.classes}`}
+                    >
+                      {ResultIcon ? <ResultIcon className="h-3.5 w-3.5" strokeWidth={3} /> : <span className="h-2 w-2 rounded-full bg-current" />}
+                    </span>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.classes}`}>{status.label}</span>
+                  </span>
                 </div>
                 <h3 className="mt-1.5 truncate text-sm font-semibold text-white sm:text-base">{selection.home} <span className="text-slate-500">vs</span> {selection.away}</h3>
                 <p className="mt-0.5 truncate text-[11px] text-slate-500">{selection.competition}{selection.category ? ` · ${selection.category}` : ''}</p>

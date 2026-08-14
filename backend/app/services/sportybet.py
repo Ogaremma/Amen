@@ -54,6 +54,27 @@ def determine_game_status(
     return "ended"
 
 
+def determine_result_status(game_status: str, picked: dict[str, Any]) -> str:
+    """Normalize SportyBet settlement metadata for the exact selected outcome.
+
+    SportyBet exposes settlement on the matched market outcome as ``isWinning``
+    plus ``refundFactor``. Scores and market descriptions are never evaluated.
+    """
+    if game_status != "ended":
+        return "pending"
+
+    refund_factor = _to_float(picked.get("refundFactor"))
+    if refund_factor is not None and math.isfinite(refund_factor) and refund_factor > 0:
+        return "void"
+
+    winning = picked.get("isWinning")
+    if winning in (1, "1", True):
+        return "won"
+    if winning in (0, "0", False):
+        return "lost"
+    return "unknown"
+
+
 def calculate_remaining_odds(selections: list[BookingSelection]) -> float:
     """Multiply finite, positive odds for upcoming games only."""
     upcoming = [selection for selection in selections if selection.game_status == "upcoming"]
@@ -167,10 +188,13 @@ def _build_selection(
     specifier = selection.get("specifier") or None
     local_kickoff = kickoff.astimezone(_LAGOS)
     raw_status = event.get("matchStatus")
+    game_status = determine_game_status(raw_status, kickoff, now)
 
     return BookingSelection(
         id=str(event_id),
         event_id=str(event_id),
+        market_id=str(selection.get("marketId")),
+        outcome_id=str(selection.get("outcomeId")),
         home=event.get("homeTeamName") or "Unknown",
         away=event.get("awayTeamName") or "Unknown",
         competition=tournament.get("name") or "Unknown competition",
@@ -185,7 +209,8 @@ def _build_selection(
         odds=_to_float(picked.get("odds")),
         specifier=specifier,
         status=raw_status,
-        game_status=determine_game_status(raw_status, kickoff, now),
+        game_status=game_status,
+        result_status=determine_result_status(game_status, picked),
     )
 
 

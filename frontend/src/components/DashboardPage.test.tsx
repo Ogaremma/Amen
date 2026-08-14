@@ -14,22 +14,22 @@ const original: BookingResponse = {
   remaining_odds: 1.5,
   selections: [
     {
-      id: 'A', event_id: 'A', home: 'Team A', away: 'Team B', competition: 'Premier League', category: 'England',
+      id: 'A', event_id: 'A', market_id: '1', outcome_id: '1', home: 'Team A', away: 'Team B', competition: 'Premier League', category: 'England',
       kickoff: '2026-08-13T11:30:00Z', kickoff_date: '2026-08-13', kickoff_time: '11:30',
       local_kickoff_date: '2026-08-13', local_kickoff_time: '12:30', market: '1X2', outcome: 'Home', odds: 1.5,
-      status: 'Not start', game_status: 'upcoming',
+      status: 'Not start', game_status: 'upcoming', result_status: 'pending',
     },
     {
-      id: 'B', event_id: 'B', home: 'Team C', away: 'Team D', competition: 'La Liga', category: 'Spain',
+      id: 'B', event_id: 'B', market_id: '166', outcome_id: '12', home: 'Team C', away: 'Team D', competition: 'La Liga', category: 'Spain',
       kickoff: '2026-08-13T14:00:00Z', kickoff_date: '2026-08-13', kickoff_time: '14:00',
       local_kickoff_date: '2026-08-13', local_kickoff_time: '15:00', market: 'Totals', outcome: 'Over 2.5', odds: 2.5,
-      status: 'Live', game_status: 'live',
+      status: 'Live', game_status: 'live', result_status: 'pending',
     },
     {
-      id: 'C', event_id: 'C', home: 'Team E', away: 'Team F', competition: 'Serie A', category: 'Italy',
+      id: 'C', event_id: 'C', market_id: '10', outcome_id: '2', home: 'Team E', away: 'Team F', competition: 'Serie A', category: 'Italy',
       kickoff: '2026-08-13T10:00:00Z', kickoff_date: '2026-08-13', kickoff_time: '10:00',
       local_kickoff_date: '2026-08-13', local_kickoff_time: '11:00', market: 'Both Teams To Score', outcome: 'Yes', odds: 1.8,
-      status: 'Finished', game_status: 'ended',
+      status: 'Finished', game_status: 'ended', result_status: 'won',
     },
   ],
 }
@@ -70,6 +70,35 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     expect(screen.queryByText('Team E')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View 1 ended games' })).toBeInTheDocument()
     expect(screen.getByText('12:30 PM')).toBeInTheDocument()
+    expect(screen.getAllByRole('img', { name: 'Bet result: Pending' })).toHaveLength(2)
+  })
+
+  it('renders backend-provided won result on the ended card without replacing game status', async () => {
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+    await loadTicket(user)
+    await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
+    expect(screen.getByRole('img', { name: 'Bet result: Won' })).toHaveClass('text-emerald-400')
+    expect(screen.getByText('Ended')).toHaveClass('text-red-300')
+  })
+
+  it.each([
+    ['lost', 'Lost', 'text-red-400'],
+    ['void', 'Void', 'text-slate-300'],
+    ['unknown', 'Unknown', 'text-slate-500'],
+  ] as const)('renders %s settlement from the backend', async (resultStatus, label, className) => {
+    const user = userEvent.setup()
+    vi.mocked(api.fetchBookingByCode).mockResolvedValue({
+      ...original,
+      selections: original.selections.map((selection) => selection.event_id === 'C'
+        ? { ...selection, result_status: resultStatus }
+        : selection),
+    })
+    render(<DashboardPage />)
+    await loadTicket(user)
+    await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
+    expect(screen.getByRole('img', { name: `Bet result: ${label}` })).toHaveClass(className)
+    expect(screen.getByText('Ended')).toBeInTheDocument()
   })
 
   it('opens ended games without reload and preserves selection across both views', async () => {

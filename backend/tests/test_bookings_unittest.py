@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services import sportybet
-from app.services.sportybet import determine_game_status, get_booking, parse_booking
+from app.services.sportybet import determine_game_status, determine_result_status, get_booking, parse_booking
 
 
 def _ms(dt: datetime) -> int:
@@ -239,6 +239,61 @@ class ParseBookingTests(unittest.TestCase):
         self.assertEqual(determine_game_status(None, kickoff, datetime(2026, 8, 13, 11, 59, tzinfo=timezone.utc)), "upcoming")
         self.assertEqual(determine_game_status(None, kickoff, kickoff), "live")
         self.assertEqual(determine_game_status(None, kickoff, datetime(2026, 8, 13, 15, tzinfo=timezone.utc)), "ended")
+
+    def test_upcoming_and_live_selections_are_pending(self):
+        self.assertEqual(determine_result_status("upcoming", {"isWinning": 1}), "pending")
+        self.assertEqual(determine_result_status("live", {"isWinning": 0}), "pending")
+
+    def test_sportybet_winner_loser_and_void_are_normalized(self):
+        self.assertEqual(determine_result_status("ended", {"isWinning": 1, "refundFactor": 0}), "won")
+        self.assertEqual(determine_result_status("ended", {"isWinning": 0, "refundFactor": 0}), "lost")
+        self.assertEqual(determine_result_status("ended", {"isWinning": 0, "refundFactor": 1}), "void")
+
+    def test_ended_without_supported_settlement_is_unknown_not_lost(self):
+        self.assertEqual(determine_result_status("ended", {}), "unknown")
+        self.assertEqual(determine_result_status("ended", {"isWinning": "unsupported"}), "unknown")
+        self.assertEqual(determine_result_status("ended", {"refundFactor": "invalid"}), "unknown")
+
+    def test_result_uses_exact_market_outcome_and_specifier(self):
+        payload = make_payload()
+        event = payload["data"]["outcomes"][0]
+        event["matchStatus"] = "Ended"
+        # Same market id and outcome id, but the wrong specifier is a loser.
+        event["markets"][0]["outcomes"][0].update({"isWinning": 0, "refundFactor": 0})
+        # The ticket selected total=9.5, which is the winner.
+        event["markets"][1]["outcomes"][0].update({"isWinning": 1, "refundFactor": 0})
+        # Same event and market, but a different outcome is a loser.
+        event["markets"][1]["outcomes"][1].update({"isWinning": 0, "refundFactor": 0})
+
+        result = parse_booking("HW7UDH", payload)
+        selected = next(s for s in result.selections if s.market_id == "166")
+        self.assertEqual(selected.event_id, "sr:match:1001")
+        self.assertEqual(selected.market_id, "166")
+        self.assertEqual(selected.outcome_id, "12")
+        self.assertEqual(selected.specifier, "total=9.5")
+        self.assertEqual(selected.result_status, "won")
+
+    def test_result_settlement_is_matched_to_exact_event_id(self):
+        payload = make_payload()
+        first, second = payload["data"]["outcomes"]
+        first["matchStatus"] = "Ended"
+        second["matchStatus"] = "Ended"
+        first["markets"][2]["outcomes"][2].update({"isWinning": 1, "refundFactor": 0})
+        second["markets"][0]["outcomes"][1].update({"isWinning": 0, "refundFactor": 0})
+
+        result = parse_booking("HW7UDH", payload)
+        first_pick = next(s for s in result.selections if s.event_id == "sr:match:1001" and s.market_id == "1")
+        second_pick = next(s for s in result.selections if s.event_id == "sr:match:1002")
+        self.assertEqual(first_pick.result_status, "won")
+        self.assertEqual(second_pick.result_status, "lost")
+
+    def test_ended_selection_missing_settlement_remains_unknown(self):
+        payload = make_payload()
+        payload["data"]["outcomes"][0]["matchStatus"] = "Ended"
+        result = parse_booking("HW7UDH", payload)
+        ended = [s for s in result.selections if s.event_id == "sr:match:1001"]
+        self.assertTrue(ended)
+        self.assertTrue(all(s.result_status == "unknown" for s in ended))
 
     def test_remaining_odds_include_only_upcoming_selections(self):
         payload = make_payload()

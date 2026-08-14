@@ -11,6 +11,8 @@ class BookingSelection(BaseModel):
 
     id: str = Field(..., description="Selection identifier (uses the SportyBet eventId)")
     event_id: str = Field(..., description="SportyBet event identifier, e.g. sr:match:72348792")
+    market_id: str = Field(..., description="SportyBet market identifier")
+    outcome_id: str = Field(..., description="SportyBet selected outcome identifier")
     home: str = Field(..., description="Home team name")
     away: str = Field(..., description="Away team name")
     competition: str = Field(..., description="Tournament / league name")
@@ -27,6 +29,9 @@ class BookingSelection(BaseModel):
     status: str | None = Field(None, description="Match status reported by SportyBet")
     game_status: Literal["upcoming", "live", "ended"] = Field(
         ..., description="Normalized game status for the Amen ticket UI"
+    )
+    result_status: Literal["pending", "won", "lost", "void", "unknown"] = Field(
+        ..., description="Authoritative SportyBet settlement for the exact selected outcome"
     )
 
 

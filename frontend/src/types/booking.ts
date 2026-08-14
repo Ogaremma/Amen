@@ -1,6 +1,8 @@
 export interface BookingSelection {
   id: string
   event_id: string
+  market_id: string
+  outcome_id: string
   home: string
   away: string
   competition: string
@@ -16,6 +18,7 @@ export interface BookingSelection {
   specifier?: string | null
   status?: string | null
   game_status: 'upcoming' | 'live' | 'ended'
+  result_status: 'pending' | 'won' | 'lost' | 'void' | 'unknown'
 }
 
 export interface BookingResponse {
