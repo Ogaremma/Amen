@@ -226,21 +226,21 @@ export function DashboardPage() {
   }
 
   const removeBar = (position: 'top' | 'bottom', showSelectAll = false) => (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-surface/95 p-3">
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border border-white/10 bg-surface/95 p-2.5 sm:gap-3 sm:p-3">
+      <div className="min-w-0">
         {showSelectAll && (
           <button
             type="button"
             onClick={toggleAllActiveSelections}
             disabled={busy || activeSelections.length === 0}
             aria-label={allActiveSelected ? 'Deselect all live and upcoming games' : 'Select all live and upcoming games'}
-            className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${allActiveSelected ? 'border-red-400/40 bg-red-500/15 text-red-200' : 'border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]'}`}
+            className={`flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-2.5 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${allActiveSelected ? 'border-red-400/40 bg-red-500/15 text-red-200' : 'border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]'}`}
           >
             <CheckCheck className="h-3.5 w-3.5" />
             {allActiveSelected ? 'Deselect All' : 'Select All'}
           </button>
         )}
-        <span className="min-w-0 text-xs text-slate-300">
+        <span className="min-w-0 truncate text-center text-[11px] text-slate-400 sm:text-xs">
           {selectedCount ? `${selectedCount} selected` : 'Select games to remove'}
         </span>
       </div>
@@ -249,7 +249,7 @@ export function DashboardPage() {
         disabled={busy || selectedCount === 0}
         onClick={() => setConfirmOpen(true)}
         aria-label={`Remove Selected (${position})`}
-        className="shrink-0 bg-red-500 hover:bg-red-600"
+        className="shrink-0 whitespace-nowrap bg-red-500 px-2.5 hover:bg-red-600 sm:px-3"
       >
         {rebooking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
         <span className="ml-2">{rebooking ? 'Updating…' : 'Remove Selected'}</span>
@@ -337,11 +337,11 @@ export function DashboardPage() {
                 placeholder="Booking code (e.g. HW7UDH)"
                 disabled={loading}
               />
-              <Button variant="outline" size="lg" onClick={openHistory} disabled={loading} aria-label="Open booking history"><HistoryIcon className="h-4 w-4" /><span className="ml-1.5">History</span></Button>
               <Button size="lg" onClick={loadTicket} disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {loading ? 'Loading ticket…' : 'Load Ticket'}
               </Button>
+              <Button variant="outline" size="lg" onClick={openHistory} disabled={loading} aria-label="Open booking history"><HistoryIcon className="h-4 w-4" /><span className="ml-1.5">History</span></Button>
             </div>
             {error && <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
           </div>
