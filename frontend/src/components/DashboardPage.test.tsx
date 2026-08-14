@@ -89,6 +89,67 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     expect(screen.getAllByText('2 selected')).toHaveLength(2)
   })
 
+  it('selects and deselects every live/upcoming game without changing ended selections', async () => {
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
+    await user.click(screen.getByLabelText('Select Team E vs Team F'))
+    await user.click(screen.getByRole('button', { name: 'Back to ticket details' }))
+
+    const selectAll = screen.getByRole('button', { name: 'Select all live and upcoming games' })
+    await user.click(selectAll)
+    expect(screen.getByLabelText('Select Team A vs Team B')).toBeChecked()
+    expect(screen.getByLabelText('Select Team C vs Team D')).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Deselect all live and upcoming games' })).toBeInTheDocument()
+    expect(screen.getAllByText('3 selected')).toHaveLength(2)
+
+    await user.click(screen.getByRole('button', { name: 'Deselect all live and upcoming games' }))
+    expect(screen.getByLabelText('Select Team A vs Team B')).not.toBeChecked()
+    expect(screen.getByLabelText('Select Team C vs Team D')).not.toBeChecked()
+    expect(screen.getAllByText('1 selected')).toHaveLength(2)
+
+    await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
+    expect(screen.getByLabelText('Select Team E vs Team F')).toBeChecked()
+  })
+
+  it('select all completes a partial selection and removal remains one batch request', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.removeSelectedGames).mockResolvedValue(updated)
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    await user.click(screen.getByLabelText('Select Team A vs Team B'))
+    await user.click(screen.getByRole('button', { name: 'Select all live and upcoming games' }))
+    expect(screen.getByLabelText('Select Team A vs Team B')).toBeChecked()
+    expect(screen.getByLabelText('Select Team C vs Team D')).toBeChecked()
+
+    await user.click(screen.getAllByRole('button', { name: /Remove Selected \((top|bottom)\)/ })[0])
+    await user.click(screen.getByRole('button', { name: 'Remove Selected' }))
+    await screen.findByText('QRZG53')
+    expect(api.removeSelectedGames).toHaveBeenCalledTimes(1)
+    expect(api.removeSelectedGames).toHaveBeenCalledWith('HW7UDH', expect.arrayContaining(['A', 'B']))
+  })
+
+  it('uses compact transparent controls and red removal styling while preserving status colors', async () => {
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    const upcomingCheckbox = screen.getByLabelText('Select Team A vs Team B')
+    const control = screen.getByTestId('selection-control-A')
+    expect(control).toHaveClass('h-4', 'w-4', 'bg-transparent', 'peer-checked:bg-red-500')
+    expect(screen.getByText('Live')).toHaveClass('text-emerald-300')
+    expect(screen.getByText('Upcoming')).toHaveClass('text-sky-200')
+
+    await user.click(upcomingCheckbox)
+    expect(upcomingCheckbox.closest('[data-selected="true"]')).toHaveClass('border-red-400/60', 'bg-red-500/10')
+
+    await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
+    expect(screen.getByText('Ended')).toHaveClass('text-red-300')
+  })
+
   it('supports back navigation and copy', async () => {
     const user = userEvent.setup()
     render(<DashboardPage />)

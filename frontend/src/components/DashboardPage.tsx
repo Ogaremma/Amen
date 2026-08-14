@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CalendarDays,
   Check,
+  CheckCheck,
   ChevronRight,
   Clipboard,
   Clock3,
@@ -92,6 +93,8 @@ export function DashboardPage() {
     [activeSelections, endedSelections, view],
   )
   const selectedCount = selectedEventIds.size
+  const allActiveSelected = activeSelections.length > 0
+    && activeSelections.every((selection) => selectedEventIds.has(selection.event_id))
   const busy = loading || refreshing || rebooking
 
   const loadTicket = async () => {
@@ -167,6 +170,19 @@ export function DashboardPage() {
     })
   }
 
+  const toggleAllActiveSelections = () => {
+    if (busy || activeSelections.length === 0) return
+    setSelectedEventIds((current) => {
+      const next = new Set(current)
+      if (activeSelections.every((selection) => current.has(selection.event_id))) {
+        activeSelections.forEach((selection) => next.delete(selection.event_id))
+      } else {
+        activeSelections.forEach((selection) => next.add(selection.event_id))
+      }
+      return next
+    })
+  }
+
   const removeSelected = async () => {
     if (!booking || selectedCount === 0 || busy) return
     setConfirmOpen(false)
@@ -185,11 +201,25 @@ export function DashboardPage() {
     }
   }
 
-  const removeBar = (position: 'top' | 'bottom') => (
+  const removeBar = (position: 'top' | 'bottom', showSelectAll = false) => (
     <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-surface/95 p-3">
-      <span className="min-w-0 text-xs text-slate-300">
-        {selectedCount ? `${selectedCount} selected` : 'Select games to remove'}
-      </span>
+      <div className="flex min-w-0 items-center gap-2">
+        {showSelectAll && (
+          <button
+            type="button"
+            onClick={toggleAllActiveSelections}
+            disabled={busy || activeSelections.length === 0}
+            aria-label={allActiveSelected ? 'Deselect all live and upcoming games' : 'Select all live and upcoming games'}
+            className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${allActiveSelected ? 'border-red-400/40 bg-red-500/15 text-red-200' : 'border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]'}`}
+          >
+            <CheckCheck className="h-3.5 w-3.5" />
+            {allActiveSelected ? 'Deselect All' : 'Select All'}
+          </button>
+        )}
+        <span className="min-w-0 text-xs text-slate-300">
+          {selectedCount ? `${selectedCount} selected` : 'Select games to remove'}
+        </span>
+      </div>
       <Button
         size="sm"
         disabled={busy || selectedCount === 0}
@@ -215,7 +245,7 @@ export function DashboardPage() {
           const selected = selectedEventIds.has(selection.event_id)
           const status = STATUS[selection.game_status]
           return (
-            <Card key={selection.event_id} className={`relative p-3 pb-5 pr-12 transition ${selected ? 'border-accent/60 bg-accent/10' : ''}`}>
+            <Card key={selection.event_id} data-selected={selected ? 'true' : 'false'} className={`relative p-3 pb-5 pr-12 transition ${selected ? 'border-red-400/60 bg-red-500/10' : ''}`}>
               <div className="min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-accent"><Clock3 className="h-3.5 w-3.5" />{formatTime12(selection.local_kickoff_time)}</span>
@@ -240,7 +270,7 @@ export function DashboardPage() {
                   aria-label={`Select ${selection.home} vs ${selection.away}`}
                   className="peer sr-only"
                 />
-                <span className="flex h-[18px] w-[18px] items-center justify-center rounded border border-slate-500 bg-transparent text-transparent transition peer-checked:border-sky-500 peer-checked:bg-sky-500 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-sky-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
+                <span data-testid={`selection-control-${selection.event_id}`} className="flex h-4 w-4 items-center justify-center rounded border border-slate-500 bg-transparent text-transparent transition peer-checked:border-red-500 peer-checked:bg-red-500 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-red-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
                   <Check className="h-3.5 w-3.5" strokeWidth={3} />
                 </span>
               </label>
@@ -370,7 +400,7 @@ export function DashboardPage() {
       {notice && <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{notice}</div>}
       {rebooking && <div className="flex items-center gap-2 rounded-2xl border border-accent/30 bg-accent/10 p-3 text-sm text-accent"><Loader2 className="h-4 w-4 animate-spin" />SportyBet is generating the updated ticket…</div>}
 
-      {activeSelections.length > 0 && removeBar('top')}
+      {activeSelections.length > 0 && removeBar('top', true)}
       {gameList}
       {activeSelections.length === 0 && <Card className="p-4 text-sm text-slate-300">This ticket has no live or upcoming games.</Card>}
       {activeSelections.length > 0 && removeBar('bottom')}
