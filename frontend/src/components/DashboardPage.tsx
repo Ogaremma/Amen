@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CalendarDays,
   Check,
+  ChevronRight,
   Clipboard,
   Clock3,
   Loader2,
@@ -43,8 +44,8 @@ function formatOdds(odds: number | null): string {
 
 const STATUS = {
   upcoming: { label: 'Upcoming', classes: 'border-sky-400/20 bg-sky-400/10 text-sky-200' },
-  live: { label: 'Live', classes: 'border-amber-400/20 bg-amber-400/10 text-amber-200' },
-  ended: { label: 'Ended', classes: 'border-slate-400/20 bg-slate-400/10 text-slate-300' },
+  live: { label: 'Live', classes: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' },
+  ended: { label: 'Ended', classes: 'border-red-400/25 bg-red-400/10 text-red-300' },
 } as const
 
 interface DateGroup { date: string; selections: BookingSelection[] }
@@ -57,6 +58,10 @@ function groupByLocalDate(selections: BookingSelection[]): DateGroup[] {
     else groups.push({ date: selection.local_kickoff_date, selections: [selection] })
   }
   return groups
+}
+
+function sortChronologically(selections: BookingSelection[]): BookingSelection[] {
+  return [...selections].sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff))
 }
 
 export function DashboardPage() {
@@ -72,8 +77,20 @@ export function DashboardPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [view, setView] = useState<'ticket' | 'ended'>('ticket')
 
-  const groups = useMemo(() => booking ? groupByLocalDate(booking.selections) : [], [booking])
+  const activeSelections = useMemo(
+    () => booking ? sortChronologically(booking.selections.filter((selection) => selection.game_status !== 'ended')) : [],
+    [booking],
+  )
+  const endedSelections = useMemo(
+    () => booking ? sortChronologically(booking.selections.filter((selection) => selection.game_status === 'ended')) : [],
+    [booking],
+  )
+  const groups = useMemo(
+    () => groupByLocalDate(view === 'ended' ? endedSelections : activeSelections),
+    [activeSelections, endedSelections, view],
+  )
   const selectedCount = selectedEventIds.size
   const busy = loading || refreshing || rebooking
 
@@ -88,6 +105,7 @@ export function DashboardPage() {
       setOriginalBookingCode(code)
       setBooking(loaded)
       setSelectedEventIds(new Set())
+      setView('ticket')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load ticket')
     } finally {
@@ -104,6 +122,7 @@ export function DashboardPage() {
     setNotice(null)
     setCopied(false)
     setBookingCodeInput('')
+    setView('ticket')
   }
 
   const refreshOriginal = async () => {
@@ -184,6 +203,54 @@ export function DashboardPage() {
     </div>
   )
 
+  const gameList = groups.map((group) => (
+    <section key={group.date} className="space-y-2.5">
+      <div className="flex items-center gap-2 px-1">
+        <CalendarDays className="h-4 w-4 text-accent" />
+        <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-white">{formatDateHeader(group.date)}</h2>
+        <span className="ml-auto text-[11px] text-slate-500">{group.selections.length} game{group.selections.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="space-y-2">
+        {group.selections.map((selection) => {
+          const selected = selectedEventIds.has(selection.event_id)
+          const status = STATUS[selection.game_status]
+          return (
+            <Card key={selection.event_id} className={`relative p-3 pb-5 pr-12 transition ${selected ? 'border-accent/60 bg-accent/10' : ''}`}>
+              <div className="min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-accent"><Clock3 className="h-3.5 w-3.5" />{formatTime12(selection.local_kickoff_time)}</span>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.classes}`}>{status.label}</span>
+                </div>
+                <h3 className="mt-1.5 truncate text-sm font-semibold text-white sm:text-base">{selection.home} <span className="text-slate-500">vs</span> {selection.away}</h3>
+                <p className="mt-0.5 truncate text-[11px] text-slate-500">{selection.competition}{selection.category ? ` · ${selection.category}` : ''}</p>
+                <div className="mt-2 flex items-end justify-between gap-2">
+                  <div className="min-w-0 text-xs text-slate-300">
+                    <p className="truncate">{selection.market}</p>
+                    <p className="truncate font-medium text-accent">{selection.outcome}</p>
+                  </div>
+                  <p className="shrink-0 text-base font-semibold text-white">{formatOdds(selection.odds)}x</p>
+                </div>
+              </div>
+              <label className="absolute bottom-1 right-1 flex h-10 w-10 cursor-pointer items-center justify-center" title={`Select ${selection.home} vs ${selection.away}`}>
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={busy}
+                  onChange={() => toggleSelection(selection.event_id)}
+                  aria-label={`Select ${selection.home} vs ${selection.away}`}
+                  className="peer sr-only"
+                />
+                <span className="flex h-[18px] w-[18px] items-center justify-center rounded border border-slate-500 bg-transparent text-transparent transition peer-checked:border-sky-500 peer-checked:bg-sky-500 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-sky-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
+                  <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                </span>
+              </label>
+            </Card>
+          )
+        })}
+      </div>
+    </section>
+  ))
+
   if (!booking) {
     return (
       <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
@@ -212,6 +279,40 @@ export function DashboardPage() {
           </div>
         </Card>
       </motion.section>
+    )
+  }
+
+  if (view === 'ended') {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4 overflow-x-hidden">
+        <header className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => setView('ticket')} disabled={busy} aria-label="Back to ticket details">
+            <ArrowLeft className="h-4 w-4" /><span className="ml-1.5">Back</span>
+          </Button>
+          <h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">Ended Games</h1>
+          <span className="ml-auto text-xs text-slate-500">{endedSelections.length}</span>
+        </header>
+        {error && <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
+        {rebooking && <div className="flex items-center gap-2 rounded-2xl border border-accent/30 bg-accent/10 p-3 text-sm text-accent"><Loader2 className="h-4 w-4 animate-spin" />SportyBet is generating the updated ticket…</div>}
+        {endedSelections.length > 0 && removeBar('top')}
+        {gameList}
+        {endedSelections.length === 0 && <Card className="p-4 text-sm text-slate-300">This ticket has no ended games.</Card>}
+        {endedSelections.length > 0 && removeBar('bottom')}
+        <AnimatePresence>
+          {confirmOpen && (
+            <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} role="dialog" aria-modal="true">
+              <motion.div className="w-full max-w-sm rounded-3xl border border-white/10 bg-surface p-5" initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}>
+                <div className="flex gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+                  <div className="min-w-0 flex-1"><h3 className="font-semibold text-white">Remove {selectedCount} selected game{selectedCount === 1 ? '' : 's'}?</h3><p className="mt-2 text-sm leading-6 text-slate-300">SportyBet will create one new ticket from all remaining games.</p></div>
+                  <button onClick={() => setConfirmOpen(false)} aria-label="Close confirmation"><X className="h-5 w-5 text-slate-400" /></button>
+                </div>
+                <div className="mt-5 flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)}>Cancel</Button><Button size="sm" onClick={removeSelected} className="bg-red-500 hover:bg-red-600">Remove Selected</Button></div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     )
   }
 
@@ -250,6 +351,17 @@ export function DashboardPage() {
               <p className="mt-1 truncate text-lg font-semibold text-accent">{formatOdds(booking.remaining_odds)}x</p>
             </div>
           </div>
+          {endedSelections.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setView('ended')}
+              className="mt-3 flex min-h-11 w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-200 transition hover:bg-white/[0.06]"
+              aria-label={`View ${endedSelections.length} ended games`}
+            >
+              <span>Ended Games <span className="ml-1 text-red-300">{endedSelections.length}</span></span>
+              <ChevronRight className="h-4 w-4 text-slate-500" />
+            </button>
+          )}
           <p className="mt-3 text-[11px] text-slate-500">Times shown in Africa/Lagos (UTC+1).</p>
         </Card>
       </header>
@@ -258,55 +370,10 @@ export function DashboardPage() {
       {notice && <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{notice}</div>}
       {rebooking && <div className="flex items-center gap-2 rounded-2xl border border-accent/30 bg-accent/10 p-3 text-sm text-accent"><Loader2 className="h-4 w-4 animate-spin" />SportyBet is generating the updated ticket…</div>}
 
-      {booking.selections.length > 0 && removeBar('top')}
-
-      {groups.map((group) => (
-        <section key={group.date} className="space-y-2.5">
-          <div className="flex items-center gap-2 px-1">
-            <CalendarDays className="h-4 w-4 text-accent" />
-            <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-white">{formatDateHeader(group.date)}</h2>
-            <span className="ml-auto text-[11px] text-slate-500">{group.selections.length} game{group.selections.length === 1 ? '' : 's'}</span>
-          </div>
-          <div className="space-y-2">
-            {group.selections.map((selection) => {
-              const selected = selectedEventIds.has(selection.event_id)
-              const status = STATUS[selection.game_status]
-              return (
-                <Card key={selection.event_id} className={`p-3 transition ${selected ? 'border-accent/60 bg-accent/10' : ''}`}>
-                  <label className="flex cursor-pointer items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      disabled={busy}
-                      onChange={() => toggleSelection(selection.event_id)}
-                      aria-label={`Select ${selection.home} vs ${selection.away}`}
-                      className="mt-1 h-5 w-5 shrink-0 cursor-pointer accent-sky-500 disabled:cursor-not-allowed"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-accent"><Clock3 className="h-3.5 w-3.5" />{formatTime12(selection.local_kickoff_time)}</span>
-                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.classes}`}>{status.label}</span>
-                      </div>
-                      <h3 className="mt-1.5 truncate text-sm font-semibold text-white sm:text-base">{selection.home} <span className="text-slate-500">vs</span> {selection.away}</h3>
-                      <p className="mt-0.5 truncate text-[11px] text-slate-500">{selection.competition}{selection.category ? ` · ${selection.category}` : ''}</p>
-                      <div className="mt-2 flex items-end justify-between gap-2">
-                        <div className="min-w-0 text-xs text-slate-300">
-                          <p className="truncate">{selection.market}</p>
-                          <p className="truncate font-medium text-accent">{selection.outcome}</p>
-                        </div>
-                        <p className="shrink-0 text-base font-semibold text-white">{formatOdds(selection.odds)}x</p>
-                      </div>
-                    </div>
-                  </label>
-                </Card>
-              )
-            })}
-          </div>
-        </section>
-      ))}
-
-      {booking.selections.length === 0 && <Card className="p-4 text-sm text-slate-300">This ticket returned no resolvable football selections.</Card>}
-      {booking.selections.length > 0 && removeBar('bottom')}
+      {activeSelections.length > 0 && removeBar('top')}
+      {gameList}
+      {activeSelections.length === 0 && <Card className="p-4 text-sm text-slate-300">This ticket has no live or upcoming games.</Card>}
+      {activeSelections.length > 0 && removeBar('bottom')}
 
       <AnimatePresence>
         {confirmOpen && (

@@ -9,7 +9,7 @@ vi.mock('../lib/api')
 
 const original: BookingResponse = {
   booking_code: 'HW7UDH',
-  total_selections: 2,
+  total_selections: 3,
   total_odds: 3.75,
   remaining_odds: 1.5,
   selections: [
@@ -24,6 +24,12 @@ const original: BookingResponse = {
       kickoff: '2026-08-13T14:00:00Z', kickoff_date: '2026-08-13', kickoff_time: '14:00',
       local_kickoff_date: '2026-08-13', local_kickoff_time: '15:00', market: 'Totals', outcome: 'Over 2.5', odds: 2.5,
       status: 'Live', game_status: 'live',
+    },
+    {
+      id: 'C', event_id: 'C', home: 'Team E', away: 'Team F', competition: 'Serie A', category: 'Italy',
+      kickoff: '2026-08-13T10:00:00Z', kickoff_date: '2026-08-13', kickoff_time: '10:00',
+      local_kickoff_date: '2026-08-13', local_kickoff_time: '11:00', market: 'Both Teams To Score', outcome: 'Yes', odds: 1.8,
+      status: 'Finished', game_status: 'ended',
     },
   ],
 }
@@ -56,11 +62,31 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     expect(screen.getByText('Load your ticket')).toBeInTheDocument()
     await loadTicket(user)
     expect(screen.queryByLabelText('SportyBet booking code')).not.toBeInTheDocument()
-    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
     expect(screen.getAllByText('1.50x')).not.toHaveLength(0)
     expect(screen.getByText('Upcoming')).toBeInTheDocument()
     expect(screen.getByText('Live')).toBeInTheDocument()
+    expect(screen.queryByText('Ended')).not.toBeInTheDocument()
+    expect(screen.queryByText('Team E')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View 1 ended games' })).toBeInTheDocument()
     expect(screen.getByText('12:30 PM')).toBeInTheDocument()
+  })
+
+  it('opens ended games without reload and preserves selection across both views', async () => {
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+    await loadTicket(user)
+    await user.click(screen.getByLabelText('Select Team A vs Team B'))
+    await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
+    expect(screen.getByRole('heading', { name: 'Ended Games' })).toBeInTheDocument()
+    expect(screen.getByText(/Team E.*Team F/)).toBeInTheDocument()
+    expect(screen.queryByText(/Team A.*Team B/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('1 selected')).toHaveLength(2)
+    await user.click(screen.getByLabelText('Select Team E vs Team F'))
+    expect(screen.getAllByText('2 selected')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: 'Back to ticket details' }))
+    expect(screen.getByLabelText('Select Team A vs Team B')).toBeChecked()
+    expect(screen.getAllByText('2 selected')).toHaveLength(2)
   })
 
   it('supports back navigation and copy', async () => {
