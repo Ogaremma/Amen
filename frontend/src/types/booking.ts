@@ -15,6 +15,7 @@ export interface BookingSelection {
   market: string
   outcome: string
   odds: number | null
+  odds_source?: 'sportybet_current' | 'preserved_observation' | 'unavailable'
   specifier?: string | null
   status?: string | null
   game_status: 'upcoming' | 'live' | 'ended'

@@ -17,6 +17,7 @@ import {
   History as HistoryIcon,
 } from 'lucide-react'
 import { fetchBookingByCode, fetchHistory, removeSelectedGames, type HistoryItem } from '../lib/api'
+import { copyTextToClipboard } from '../lib/clipboard'
 import type { BookingResponse, BookingSelection } from '../types/booking'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
@@ -91,6 +92,9 @@ export function DashboardPage() {
   const [view, setView] = useState<'ticket' | 'ended'>('ticket')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<HistoryItem[]>([])
+  const [historyCopying, setHistoryCopying] = useState<string | null>(null)
+  const [historyCopied, setHistoryCopied] = useState<string | null>(null)
+  const [historyCopyError, setHistoryCopyError] = useState<string | null>(null)
 
   const activeSelections = useMemo(
     () => booking ? sortChronologically(booking.selections.filter((selection) => selection.game_status !== 'ended')) : [],
@@ -174,13 +178,30 @@ export function DashboardPage() {
     setCopying(true)
     setCopied(false)
     try {
-      await navigator.clipboard.writeText(booking.booking_code)
+      if (!await copyTextToClipboard(booking.booking_code)) throw new Error('Clipboard write failed')
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1800)
     } catch {
       setError('Unable to copy the booking code.')
     } finally {
       setCopying(false)
+    }
+  }
+
+  const copyHistoryCode = async (code: string) => {
+    if (historyCopying) return
+    setHistoryCopying(code)
+    setHistoryCopied(null)
+    setHistoryCopyError(null)
+    try {
+      if (!await copyTextToClipboard(code)) throw new Error('Clipboard write failed')
+      setHistoryCopied(code)
+      window.setTimeout(() => setHistoryCopied((current) => current === code ? null : current), 1800)
+    } catch {
+      setHistoryCopyError(code)
+      window.setTimeout(() => setHistoryCopyError((current) => current === code ? null : current), 2400)
+    } finally {
+      setHistoryCopying(null)
     }
   }
 
@@ -294,7 +315,9 @@ export function DashboardPage() {
                     <p className="truncate">{selection.market}</p>
                     <p className="truncate font-medium text-accent">{selection.outcome}</p>
                   </div>
-                  <p className="shrink-0 text-base font-semibold text-white">{formatOdds(selection.odds)}x</p>
+                  <p className="shrink-0 text-base font-semibold text-white">
+                    {selection.odds === null ? '—' : `${formatOdds(selection.odds)}x`}
+                  </p>
                 </div>
               </div>
               <label className="absolute bottom-1 right-1 flex h-10 w-10 cursor-pointer items-center justify-center" title={`Select ${selection.home} vs ${selection.away}`}>
@@ -318,7 +341,7 @@ export function DashboardPage() {
   ))
 
   if (!booking) {
-    if (historyOpen) return <div className="mx-auto max-w-3xl space-y-4"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setHistoryOpen(false)} aria-label="Back to booking input"><ArrowLeft className="h-4 w-4" /><span className="ml-1.5">Back</span></Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">History</h1></header>{history.length === 0 ? <Card className="p-4 text-sm text-slate-300">No booking codes yet.</Card> : history.map((item) => <Card key={item.id} className="flex items-center gap-3 p-4"><button type="button" className="min-w-0 flex-1 text-left" onClick={() => reopenHistory(item.booking_code)}><p className="font-semibold tracking-wide text-white">{item.booking_code}</p><p className="mt-1 text-xs text-slate-400">Loaded {new Date(item.loaded_at).toLocaleString()}</p></button><button type="button" aria-label={`Copy ${item.booking_code}`} onClick={() => navigator.clipboard.writeText(item.booking_code)} className="rounded-xl border border-white/10 p-2 text-slate-300"><Clipboard className="h-4 w-4" /></button></Card>)}</div>
+    if (historyOpen) return <div className="mx-auto max-w-3xl space-y-4"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setHistoryOpen(false)} aria-label="Back to booking input"><ArrowLeft className="h-4 w-4" /><span className="ml-1.5">Back</span></Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">History</h1></header>{history.length === 0 ? <Card className="p-4 text-sm text-slate-300">No booking codes yet.</Card> : history.map((item) => <Card key={item.id} className="flex items-center gap-3 p-4"><button type="button" className="min-w-0 flex-1 text-left" onClick={() => reopenHistory(item.booking_code)}><p className="font-semibold tracking-wide text-white">{item.booking_code}</p><p className="mt-1 text-xs text-slate-400">Loaded {new Date(item.loaded_at).toLocaleString()}</p></button><div className="flex shrink-0 items-center gap-2"><span role="status" aria-live="polite" className="min-w-[5.5rem] text-right text-[11px] text-emerald-300">{historyCopied === item.booking_code ? 'Copied to clipboard' : historyCopyError === item.booking_code ? 'Copy failed' : ''}</span><button type="button" aria-label={`Copy ${item.booking_code}`} disabled={historyCopying !== null} onClick={() => copyHistoryCode(item.booking_code)} className="rounded-xl border border-white/10 p-2 text-slate-300 disabled:opacity-50">{historyCopied === item.booking_code ? <Check className="h-4 w-4 text-emerald-300" /> : historyCopying === item.booking_code ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clipboard className="h-4 w-4" />}</button></div></Card>)}</div>
     return (
       <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
         <Card className="mx-auto max-w-2xl">

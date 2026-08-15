@@ -20,6 +20,7 @@ async def fetch_booking(
 ) -> BookingResponse:
     booking = await get_booking(booking_code)
     if user is not None:
+        booking = history_store.apply_observed_odds(booking)
         history_store.upsert(user.telegram_user_id, booking.booking_code, booking.total_selections, booking.remaining_odds)
     return booking
 
@@ -39,5 +40,7 @@ async def fetch_booking(
 async def remove_selected(
     request: RemoveSelectedRequest,
     booking_code: str = Path(..., description="Current SportyBet booking / share code"),
+    user: TelegramUser | None = Depends(optional_verified_telegram_user),
 ) -> BookingResponse:
-    return await rebook_without_events(booking_code, request.event_ids)
+    booking = await rebook_without_events(booking_code, request.event_ids)
+    return history_store.apply_observed_odds(booking) if user is not None else booking

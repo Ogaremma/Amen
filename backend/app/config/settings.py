@@ -57,6 +57,11 @@ class Settings(BaseSettings):
         validation_alias="HISTORY_DATABASE_PATH",
     )
 
+    database_url: str | None = Field(
+        default=None,
+        validation_alias="DATABASE_URL",
+    )
+
     # ---------------------------------------------------------
     # CORS
     # ---------------------------------------------------------

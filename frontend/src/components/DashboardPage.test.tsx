@@ -49,9 +49,11 @@ describe('DashboardPage Phase 3 ticket flow', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.mocked(api.fetchBookingByCode).mockResolvedValue(original)
+    vi.mocked(api.fetchHistory).mockResolvedValue([])
     clipboardWrite = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
+      writable: true,
       value: { writeText: clipboardWrite },
     })
   })
@@ -249,5 +251,49 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     fireEvent.change(screen.getByLabelText('SportyBet booking code'), { target: { value: 'HW7UDH' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load Ticket' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Loading ticket…' })).toBeDisabled())
+  })
+
+  it('shows history copy confirmation without leaving the history page', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.fetchHistory).mockResolvedValue([
+      { id: 1, booking_code: 'OLD123', loaded_at: '2026-08-14T19:42:00Z', selection_count: 2, remaining_odds: 1.4 },
+      { id: 2, booking_code: 'OTHER9', loaded_at: '2026-08-13T19:42:00Z', selection_count: 1, remaining_odds: 1.2 },
+    ])
+    render(<DashboardPage />)
+    await user.click(screen.getByRole('button', { name: 'Open booking history' }))
+    await screen.findByText('OLD123')
+    let resolveCopy: (() => void) | undefined
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(() => new Promise<void>((resolve) => { resolveCopy = resolve }))
+    await user.click(screen.getByRole('button', { name: 'Copy OLD123' }))
+    expect(writeText).toHaveBeenCalledWith('OLD123')
+    expect(screen.queryByText('Copied to clipboard')).not.toBeInTheDocument()
+    resolveCopy?.()
+    expect(await screen.findByText('Copied to clipboard')).toBeInTheDocument()
+    expect(screen.getAllByRole('status').filter((status) => status.textContent === 'Copied to clipboard')).toHaveLength(1)
+    expect(screen.getByText('History')).toBeInTheDocument()
+  })
+
+  it('shows history copy failure when clipboard rejects', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.fetchHistory).mockResolvedValue([{ id: 1, booking_code: 'OLD123', loaded_at: '2026-08-14T19:42:00Z', selection_count: 2, remaining_odds: 1.4 }])
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('clipboard unavailable'))
+    render(<DashboardPage />)
+    await user.click(screen.getByRole('button', { name: 'Open booking history' }))
+    await user.click(await screen.findByRole('button', { name: 'Copy OLD123' }))
+    expect(writeText).toHaveBeenCalledWith('OLD123')
+    expect(await screen.findByText('Copy failed')).toBeInTheDocument()
+    expect(screen.getByText('History')).toBeInTheDocument()
+  })
+
+  it('uses the legacy copy fallback only when it reports success', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.fetchHistory).mockResolvedValue([{ id: 1, booking_code: 'OLD123', loaded_at: '2026-08-14T19:42:00Z', selection_count: 2, remaining_odds: 1.4 }])
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn().mockReturnValue(true) })
+    render(<DashboardPage />)
+    await user.click(screen.getByRole('button', { name: 'Open booking history' }))
+    await user.click(await screen.findByRole('button', { name: 'Copy OLD123' }))
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
+    expect(await screen.findByText('Copied to clipboard')).toBeInTheDocument()
   })
 })

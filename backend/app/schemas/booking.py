@@ -25,6 +25,10 @@ class BookingSelection(BaseModel):
     market: str = Field(..., description="Selected market description")
     outcome: str = Field(..., description="Selected outcome description")
     odds: float | None = Field(None, description="Odds for the selected outcome")
+    odds_source: Literal["sportybet_current", "preserved_observation", "unavailable"] = Field(
+        "sportybet_current",
+        description="Whether odds are current SportyBet data, a preserved observation, or unavailable",
+    )
     specifier: str | None = Field(None, description="Market specifier, e.g. total=8.5")
     status: str | None = Field(None, description="Match status reported by SportyBet")
     game_status: Literal["upcoming", "live", "ended"] = Field(
