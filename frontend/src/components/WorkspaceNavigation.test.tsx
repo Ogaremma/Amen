@@ -6,11 +6,24 @@ import App from '../App'
 describe('Phase 5A workspace navigation', () => {
   afterEach(cleanup)
 
-  it('starts in Optimizer and exposes the existing booking workflow', () => {
+  it('starts on the dashboard with only workspace cards', () => {
     render(<App />)
-    expect(screen.getByRole('button', { name: 'Optimizer' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByLabelText('SportyBet booking code')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open booking history' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Optimizer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '39 Billion Analyzer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Future Tool/i })).toBeInTheDocument()
+    expect(screen.getByLabelText('SportyBet booking code')).not.toBeVisible()
+    expect(screen.getByText('No training data has been imported yet.')).not.toBeVisible()
+  })
+
+  it('opens Optimizer as a dedicated view and returns to the dashboard', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Optimizer' }))
+    expect(screen.getByLabelText('SportyBet booking code')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Open booking history' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Back to Dashboard' }))
+    expect(screen.getByLabelText('SportyBet booking code')).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Optimizer' })).toBeVisible()
   })
 
   it('shows an explicit analyzer empty state without collecting data', async () => {
@@ -23,5 +36,13 @@ describe('Phase 5A workspace navigation', () => {
     expect(screen.getByText('No training data has been imported yet.')).toBeInTheDocument()
     expect(screen.getByText('Empty-state values - no analysis has been performed.')).toBeInTheDocument()
     expect(screen.queryByLabelText('SportyBet booking code')).not.toBeVisible()
+  })
+
+  it('opens the future tool placeholder as a dedicated view', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: /Future Tool/i }))
+    expect(screen.getByRole('heading', { name: 'Under construction' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument()
   })
 })

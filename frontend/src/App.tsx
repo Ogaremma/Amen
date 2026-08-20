@@ -1,11 +1,14 @@
 import { useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { AnalyzerPage } from './components/AnalyzerPage'
 import { DashboardPage } from './components/DashboardPage'
 import { WorkspaceNavigation, type Workspace } from './components/WorkspaceNavigation'
+import { Button } from './components/ui/button'
+import { PlaceholderPage } from './components/PlaceholderPage'
 import { useTelegramWebApp } from './hooks/useTelegramWebApp'
 
 function App() {
-  const [workspace, setWorkspace] = useState<Workspace>('optimizer')
+  const [view, setView] = useState<'dashboard' | Workspace | 'future'>('dashboard')
   const { isTelegram, user, verified, authStatus, authError } = useTelegramWebApp()
 
   // Prefer the backend-verified name; fall back to the (display-only) initData
@@ -39,12 +42,18 @@ function App() {
             </div>
           )}
 
-          <WorkspaceNavigation active={workspace} onChange={setWorkspace} />
+          {view === 'dashboard' ? (
+            <WorkspaceNavigation active={null} onChange={setView} onFutureTool={() => setView('future')} />
+          ) : (
+            <Button variant="outline" onClick={() => setView('dashboard')}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Button>
+          )}
 
-          <div hidden={workspace !== 'optimizer'} aria-hidden={workspace !== 'optimizer'}>
-            <DashboardPage />
-          </div>
-          {workspace === 'analyzer' && <AnalyzerPage />}
+          <div hidden={view !== 'optimizer'} aria-hidden={view !== 'optimizer'}><DashboardPage /></div>
+          <div hidden={view !== 'analyzer'} aria-hidden={view !== 'analyzer'}><AnalyzerPage /></div>
+          {view === 'future' && <PlaceholderPage title="Future Tool" description="This workspace is coming soon." />}
         </main>
       </div>
     </div>
