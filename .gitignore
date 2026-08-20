@@ -5,6 +5,13 @@
 .env.*
 !.env.example
 
+# Secrets
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
 # ============================================
 # Python
 # ============================================

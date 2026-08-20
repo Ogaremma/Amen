@@ -29,6 +29,7 @@ function getWebApp(): TelegramWebApp | null {
   return window.Telegram?.WebApp ?? null
 }
 
+
 export function useTelegramWebApp(): TelegramState {
   const [state, setState] = useState<TelegramState>({
     isTelegram: false,

@@ -1,7 +1,11 @@
+import { useState } from 'react'
+import { AnalyzerPage } from './components/AnalyzerPage'
 import { DashboardPage } from './components/DashboardPage'
+import { WorkspaceNavigation, type Workspace } from './components/WorkspaceNavigation'
 import { useTelegramWebApp } from './hooks/useTelegramWebApp'
 
 function App() {
+  const [workspace, setWorkspace] = useState<Workspace>('optimizer')
   const { isTelegram, user, verified, authStatus, authError } = useTelegramWebApp()
 
   // Prefer the backend-verified name; fall back to the (display-only) initData
@@ -35,7 +39,12 @@ function App() {
             </div>
           )}
 
-          <DashboardPage />
+          <WorkspaceNavigation active={workspace} onChange={setWorkspace} />
+
+          <div hidden={workspace !== 'optimizer'} aria-hidden={workspace !== 'optimizer'}>
+            <DashboardPage />
+          </div>
+          {workspace === 'analyzer' && <AnalyzerPage />}
         </main>
       </div>
     </div>
