@@ -11,7 +11,9 @@ class Settings(BaseSettings):
 
     forebet_base_url: str = Field(default="https://www.forebet.com", validation_alias="FOREBET_BASE_URL")
     forebet_timeout: float = Field(default=20.0, validation_alias="FOREBET_TIMEOUT")
-    forebet_user_agent: str = Field(default="Mozilla/5.0 (compatible; Amen Forebet Analyzer/1.0)", validation_alias="FOREBET_USER_AGENT")
+    forebet_user_agent: str = Field(default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", validation_alias="FOREBET_USER_AGENT")
+    forebet_retries: int = Field(default=2, validation_alias="FOREBET_RETRIES", ge=0, le=5)
+    forebet_retry_backoff: float = Field(default=0.5, validation_alias="FOREBET_RETRY_BACKOFF", ge=0)
 
     # ---------------------------------------------------------
     # SportyBet

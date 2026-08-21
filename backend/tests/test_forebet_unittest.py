@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.schemas.forebet import ForebetMatch, ForebetPredictionResult
 from app.services.forebet import (
+    ForebetAccessDeniedError,
+    ForebetAcquisitionError,
     fetch_forebet_page,
     get_draw_matches,
     is_draw_prediction,
@@ -126,6 +128,44 @@ def test_http_timeout():
     with patch("httpx.AsyncClient.get", new=AsyncMock(side_effect=httpx.ReadTimeout("timeout", request=request))):
         with pytest.raises(httpx.ReadTimeout):
             asyncio.run(fetch_forebet_page(SOURCE_URL))
+
+
+def test_successful_html_acquisition_using_mocked_http():
+    response = httpx.Response(200, text="<html><body>ok</body></html>", headers={"content-type": "text/html"}, request=httpx.Request("GET", SOURCE_URL))
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)) as mocked:
+        assert asyncio.run(fetch_forebet_page(SOURCE_URL)) == "<html><body>ok</body></html>"
+        request_headers = mocked.await_args.kwargs if mocked.await_args else {}
+        assert request_headers == {}
+
+
+def test_403_is_explicit_access_denied():
+    response = httpx.Response(403, text="Forbidden", request=httpx.Request("GET", SOURCE_URL))
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+        with pytest.raises(ForebetAccessDeniedError, match="HTTP 403"):
+            asyncio.run(fetch_forebet_page(SOURCE_URL))
+
+
+def test_malformed_response_is_rejected():
+    response = httpx.Response(200, text="not html", headers={"content-type": "text/plain"}, request=httpx.Request("GET", SOURCE_URL))
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+        with pytest.raises(ForebetAcquisitionError):
+            asyncio.run(fetch_forebet_page(SOURCE_URL))
+
+
+def test_transient_failure_retries_then_succeeds():
+    response = httpx.Response(200, text="<html><body>ok</body></html>", headers={"content-type": "text/html"}, request=httpx.Request("GET", SOURCE_URL))
+    with patch("app.services.forebet.get_settings") as settings, patch("httpx.AsyncClient.get", new=AsyncMock(side_effect=[httpx.ConnectError("failed", request=httpx.Request("GET", SOURCE_URL)), response])) as mocked:
+        settings.return_value.forebet_timeout = 1.0
+        settings.return_value.forebet_user_agent = "test-agent"
+        settings.return_value.forebet_retries = 1
+        settings.return_value.forebet_retry_backoff = 0
+        assert asyncio.run(fetch_forebet_page(SOURCE_URL)) == "<html><body>ok</body></html>"
+        assert mocked.await_count == 2
+
+
+def test_parser_is_independent_of_acquisition(sample_html):
+    with patch("app.services.forebet.httpx.AsyncClient.get", side_effect=AssertionError("network must not be used")):
+        assert len(parse_forebet_html(sample_html, SOURCE_URL)) == 44
 
 
 def test_api_rejects_non_forebet_url():

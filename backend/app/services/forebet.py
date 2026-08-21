@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import asyncio
 from datetime import date, datetime
 from typing import Iterable
 from urllib.parse import urljoin
@@ -14,6 +15,14 @@ from app.schemas.forebet import (
     ForebetPredictionResult,
     ForebetProbability,
 )
+
+
+class ForebetAcquisitionError(RuntimeError):
+    """Raised when Forebet returns a response that cannot be parsed safely."""
+
+
+class ForebetAccessDeniedError(ForebetAcquisitionError):
+    """Raised when Forebet explicitly rejects the request."""
 
 
 def _text(node) -> str | None:
@@ -123,10 +132,57 @@ def get_draw_matches(matches: Iterable[ForebetMatch]) -> list[ForebetMatch]:
     return [match for match in matches if is_draw_prediction(match.predicted_result)]
 
 
-async def fetch_forebet_page(url: str) -> str:
+def _forebet_headers(url: str, user_agent: str) -> dict[str, str]:
+    return {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": urljoin(url, "/en/"),
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+    }
+
+
+def _validate_forebet_html(html: str, content_type: str | None) -> None:
+    if content_type and "html" not in content_type.lower():
+        raise ForebetAcquisitionError(f"Forebet returned unsupported content type: {content_type}")
+    lowered = html.lower()
+    if not html.strip() or "<html" not in lowered:
+        raise ForebetAcquisitionError("Forebet returned an empty or malformed HTML response")
+
+
+async def fetch_forebet_page(url: str, *, client: httpx.AsyncClient | None = None) -> str:
     settings = get_settings()
-    headers = {"User-Agent": settings.forebet_user_agent}
-    async with httpx.AsyncClient(timeout=settings.forebet_timeout, headers=headers, follow_redirects=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.text
+    owns_client = client is None
+    http_client = client or httpx.AsyncClient(
+        timeout=httpx.Timeout(settings.forebet_timeout),
+        headers=_forebet_headers(url, settings.forebet_user_agent),
+        follow_redirects=True,
+    )
+    try:
+        for attempt in range(settings.forebet_retries + 1):
+            try:
+                response = await http_client.get(url)
+                if response.status_code == 403:
+                    raise ForebetAccessDeniedError("Forebet rejected the request with HTTP 403")
+                response.raise_for_status()
+                _validate_forebet_html(response.text, response.headers.get("content-type"))
+                return response.text
+            except ForebetAccessDeniedError:
+                raise
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                if attempt >= settings.forebet_retries:
+                    raise
+                await asyncio.sleep(settings.forebet_retry_backoff * (2 ** attempt))
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in {429, 500, 502, 503, 504} or attempt >= settings.forebet_retries:
+                    raise
+                await asyncio.sleep(settings.forebet_retry_backoff * (2 ** attempt))
+        raise ForebetAcquisitionError("Forebet acquisition exhausted without a response")
+    finally:
+        if owns_client:
+            await http_client.aclose()
