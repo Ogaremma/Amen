@@ -53,3 +53,59 @@ class ForebetAnalyzeResponse(BaseModel):
     draw_count: int
     draw_matches: list[ForebetMatch]
     matches: list[ForebetMatch]
+
+
+class SportyBetEvent(BaseModel):
+    event_id: str
+    home_team: str
+    away_team: str
+    home_team_name: str | None = None
+    away_team_name: str | None = None
+    kickoff: datetime
+    competition: str | None = None
+    game_id: str | None = None
+    home_team_id: str | None = None
+    away_team_id: str | None = None
+    sport_id: str | None = None
+    sport_name: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    tournament_id: str | None = None
+    tournament_name: str | None = None
+    status: int | None = None
+    match_status: str | None = None
+    market_id: str | None = None
+    product_id: int | None = None
+    specifier: str | None = None
+    outcome_home_id: str | None = None
+    outcome_draw_id: str | None = None
+    outcome_away_id: str | None = None
+    odds_home: float | None = None
+    odds_draw: float | None = None
+    odds_away: float | None = None
+    probability_home: float | None = None
+    probability_draw: float | None = None
+    probability_away: float | None = None
+    source: str = "sportybet"
+
+
+class FixtureMatchStatus(str, Enum):
+    MATCHED_EXACT = "MATCHED_EXACT"
+    MATCHED_NORMALIZED = "MATCHED_NORMALIZED"
+    MATCHED_FUZZY = "MATCHED_FUZZY"
+    UNMATCHED = "UNMATCHED"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+class FixtureMatchResult(BaseModel):
+    forebet_match: ForebetMatch
+    status: FixtureMatchStatus
+    matching_method: str | None = None
+    matching_confidence: float | None = None
+    sportybet_event: SportyBetEvent | None = None
+    candidates: list[SportyBetEvent] = Field(default_factory=list)
+    reason: str | None = None
+
+class FixtureMatchDateGroup(BaseModel):
+    date: date
+    results: list[FixtureMatchResult]

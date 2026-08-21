@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from app.config.settings import get_settings
 from app.schemas.booking import BookingResponse, BookingSelection
+from app.schemas.forebet import SportyBetEvent
 
 logger = logging.getLogger("amen.sportybet")
 
@@ -27,6 +28,185 @@ except ZoneInfoNotFoundError:
     # no daylight-saving transitions, so this remains an exact aware fallback.
     _LAGOS = timezone(timedelta(hours=1), name="Africa/Lagos")
 _FALLBACK_LIVE_WINDOW = timedelta(hours=3)
+_FOOTBALL_MARKET_ID = "1"
+_HOME_OUTCOME_ID = "1"
+_DRAW_OUTCOME_ID = "2"
+_AWAY_OUTCOME_ID = "3"
+
+
+class SportyBetUpcomingEventsResult:
+    def __init__(self, total_num: int, events: list[SportyBetEvent]) -> None:
+        self.total_num = total_num
+        self.events = events
+
+
+def _to_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_upcoming_event(raw: Any) -> SportyBetEvent | None:
+    if not isinstance(raw, dict):
+        return None
+    event_id = raw.get("eventId")
+    home = raw.get("homeTeamName")
+    away = raw.get("awayTeamName")
+    start_ms = raw.get("estimateStartTime")
+    if not event_id or not home or not away or start_ms is None:
+        return None
+    try:
+        kickoff = datetime.fromtimestamp(int(start_ms) / 1000, tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+    sport = raw.get("sport") if isinstance(raw.get("sport"), dict) else {}
+    category = sport.get("category") if isinstance(sport.get("category"), dict) else {}
+    tournament = (
+        category.get("tournament") if isinstance(category.get("tournament"), dict) else {}
+    )
+    market = next(
+        (
+            item
+            for item in raw.get("markets", [])
+            if isinstance(item, dict) and str(item.get("id")) == _FOOTBALL_MARKET_ID
+        ),
+        None,
+    )
+    outcomes = market.get("outcomes", []) if isinstance(market, dict) else []
+
+    def active_outcome(outcome_id: str) -> dict[str, Any] | None:
+        for outcome in outcomes:
+            if (
+                isinstance(outcome, dict)
+                and str(outcome.get("id")) == outcome_id
+                and outcome.get("isActive") in (1, "1", True)
+            ):
+                return outcome
+        return None
+
+    home_outcome = active_outcome(_HOME_OUTCOME_ID)
+    draw_outcome = active_outcome(_DRAW_OUTCOME_ID)
+    away_outcome = active_outcome(_AWAY_OUTCOME_ID)
+    tournament_name = tournament.get("name")
+
+    return SportyBetEvent(
+        event_id=str(event_id),
+        game_id=str(raw["gameId"]) if raw.get("gameId") is not None else None,
+        home_team_id=raw.get("homeTeamId"),
+        home_team_name=str(home),
+        away_team_id=raw.get("awayTeamId"),
+        away_team_name=str(away),
+        home_team=str(home),
+        away_team=str(away),
+        sport_id=sport.get("id"),
+        sport_name=sport.get("name"),
+        category_id=category.get("id"),
+        category_name=category.get("name"),
+        tournament_id=tournament.get("id"),
+        tournament_name=tournament_name,
+        competition=tournament_name,
+        kickoff=kickoff,
+        status=_to_int(raw.get("status")),
+        match_status=raw.get("matchStatus"),
+        market_id=str(market.get("id")) if market else None,
+        product_id=_to_int(market.get("product")) if market else None,
+        specifier=market.get("specifier") or None if market else None,
+        outcome_home_id=str(home_outcome.get("id")) if home_outcome else None,
+        outcome_draw_id=str(draw_outcome.get("id")) if draw_outcome else None,
+        outcome_away_id=str(away_outcome.get("id")) if away_outcome else None,
+        odds_home=_to_float(home_outcome.get("odds")) if home_outcome else None,
+        odds_draw=_to_float(draw_outcome.get("odds")) if draw_outcome else None,
+        odds_away=_to_float(away_outcome.get("odds")) if away_outcome else None,
+        probability_home=_to_float(home_outcome.get("probability")) if home_outcome else None,
+        probability_draw=_to_float(draw_outcome.get("probability")) if draw_outcome else None,
+        probability_away=_to_float(away_outcome.get("probability")) if away_outcome else None,
+    )
+
+
+def parse_upcoming_events_page(payload: Any) -> SportyBetUpcomingEventsResult:
+    if not isinstance(payload, dict) or payload.get("bizCode") != _BIZ_CODE_OK:
+        raise HTTPException(status_code=502, detail="Invalid SportyBet upcoming-events response")
+    data = payload.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("tournaments", []), list):
+        raise HTTPException(status_code=502, detail="Invalid SportyBet upcoming-events response")
+    events: list[SportyBetEvent] = []
+    for tournament in data.get("tournaments", []):
+        if not isinstance(tournament, dict):
+            continue
+        for raw in tournament.get("events", []) or []:
+            parsed = _parse_upcoming_event(raw)
+            if parsed is not None:
+                events.append(parsed)
+    return SportyBetUpcomingEventsResult(_to_int(data.get("totalNum")) or 0, events)
+
+
+def _upcoming_url() -> str:
+    return f"{settings.sportybet_base_url.rstrip('/')}/{settings.sportybet_upcoming_path.strip('/')}"
+
+
+async def _fetch_upcoming_page(page_num: int, page_size: int) -> SportyBetUpcomingEventsResult:
+    params = {
+        "sportId": settings.sportybet_football_sport_id,
+        "marketId": settings.sportybet_upcoming_market_ids,
+        "pageSize": page_size,
+        "pageNum": page_num,
+        "_t": int(time.time() * 1000),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=settings.sportybet_timeout) as client:
+            response = await client.get(_upcoming_url(), params=params, headers=_headers())
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="SportyBet request timed out") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Unable to reach SportyBet") from exc
+    if response.status_code != 200:
+        raise HTTPException(status_code=502, detail="Unable to fetch upcoming events from SportyBet")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Invalid SportyBet response") from exc
+    return parse_upcoming_events_page(payload)
+
+
+async def get_upcoming_football_events(
+    start_datetime: datetime | None = None,
+    end_datetime: datetime | None = None,
+    page_size: int | None = None,
+    max_pages: int | None = None,
+) -> SportyBetUpcomingEventsResult:
+    size = page_size or settings.sportybet_upcoming_page_size
+    limit = max_pages or settings.sportybet_upcoming_max_pages
+    if size < 1 or size > 100 or limit < 1:
+        raise ValueError("Invalid SportyBet pagination configuration")
+
+    def as_utc(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(
+            timezone.utc
+        )
+
+    start, end = as_utc(start_datetime), as_utc(end_datetime)
+    if start and end and start > end:
+        raise ValueError("start_datetime must not be after end_datetime")
+
+    all_events: list[SportyBetEvent] = []
+    total_num = 0
+    for page in range(1, limit + 1):
+        result = await _fetch_upcoming_page(page, size)
+        total_num = result.total_num
+        all_events.extend(result.events)
+        if not result.events or page * size >= total_num:
+            break
+
+    filtered = [
+        event
+        for event in all_events
+        if (start is None or event.kickoff >= start) and (end is None or event.kickoff <= end)
+    ]
+    return SportyBetUpcomingEventsResult(total_num, filtered)
 
 
 def determine_game_status(

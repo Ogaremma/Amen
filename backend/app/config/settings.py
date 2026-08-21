@@ -29,6 +29,34 @@ class Settings(BaseSettings):
         validation_alias="SPORTYBET_SHARE_PATH",
     )
 
+    sportybet_upcoming_path: str = Field(
+        default="/api/ng/factsCenter/pcUpcomingEvents",
+        validation_alias="SPORTYBET_UPCOMING_PATH",
+    )
+
+    sportybet_football_sport_id: str = Field(
+        default="sr:sport:1",
+        validation_alias="SPORTYBET_FOOTBALL_SPORT_ID",
+    )
+
+    sportybet_upcoming_market_ids: str = Field(
+        default="1,18,10,29,11,26,36,14,60100",
+        validation_alias="SPORTYBET_UPCOMING_MARKET_IDS",
+    )
+
+    sportybet_upcoming_page_size: int = Field(
+        default=100,
+        validation_alias="SPORTYBET_UPCOMING_PAGE_SIZE",
+        ge=1,
+        le=100,
+    )
+
+    sportybet_upcoming_max_pages: int = Field(
+        default=20,
+        validation_alias="SPORTYBET_UPCOMING_MAX_PAGES",
+        ge=1,
+    )
+
     sportybet_timeout: float = Field(
         default=20.0,
         validation_alias="SPORTYBET_TIMEOUT",
