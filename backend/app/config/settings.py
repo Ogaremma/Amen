@@ -6,6 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # ---------------------------------------------------------
+    # Forebet
+    # ---------------------------------------------------------
+
+    forebet_base_url: str = Field(default="https://www.forebet.com", validation_alias="FOREBET_BASE_URL")
+    forebet_timeout: float = Field(default=20.0, validation_alias="FOREBET_TIMEOUT")
+    forebet_user_agent: str = Field(default="Mozilla/5.0 (compatible; Amen Forebet Analyzer/1.0)", validation_alias="FOREBET_USER_AGENT")
+
+    # ---------------------------------------------------------
     # SportyBet
     # ---------------------------------------------------------
 
