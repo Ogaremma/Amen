@@ -164,6 +164,13 @@ def test_browser_fallback_failure_remains_access_denied():
             asyncio.run(fetch_forebet_page(SOURCE_URL))
 
 
+def test_browser_response_without_fixture_table_is_challenge():
+    from app.services.forebet import _validate_browser_forebet_html, ForebetBrowserChallengeError
+
+    with pytest.raises(ForebetBrowserChallengeError, match="no fixture table"):
+        _validate_browser_forebet_html("<html><body>Forebet</body></html>", "https://www.forebet.com/test", "www.forebet.com")
+
+
 def test_malformed_response_is_rejected():
     response = httpx.Response(200, text="not html", headers={"content-type": "text/plain"}, request=httpx.Request("GET", SOURCE_URL))
     with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):

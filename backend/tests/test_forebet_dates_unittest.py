@@ -9,7 +9,7 @@ def test_verified_date_route():
 
 def test_future_dates_use_lagos_calendar_and_exclude_today():
     now = datetime(2026, 8, 20, 23, 30, tzinfo=timezone.utc)
-    assert future_prediction_dates(now=now, count=3) == [datetime(2026, 8, 21).date(), datetime(2026, 8, 22).date(), datetime(2026, 8, 23).date()]
+    assert future_prediction_dates(now=now, count=3) == [datetime(2026, 8, 22).date(), datetime(2026, 8, 23).date(), datetime(2026, 8, 24).date()]
 
 
 def test_urls_are_dynamic_and_ordered():

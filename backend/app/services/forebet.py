@@ -177,6 +177,11 @@ def _validate_browser_forebet_html(html: str, final_url: str, expected_host: str
     _validate_forebet_html(html, "text/html")
     if "forebet" not in lowered:
         raise ForebetAcquisitionError("Browser response was not recognizable Forebet HTML")
+    # A challenge/interstitial can contain the Forebet brand while still
+    # lacking the fixture table consumed by the pure parser. Treat it as an
+    # access challenge rather than reporting a misleading acquisition success.
+    if not re.search(r'class=["\'][^"\']*schema[^"\']*["\']', html, re.IGNORECASE):
+        raise ForebetBrowserChallengeError("Forebet browser response contained no fixture table")
 
 
 async def fetch_forebet_page_browser(url: str) -> str:
