@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import re
 import asyncio
+import logging
 from datetime import date, datetime
 from typing import Iterable
 from urllib.parse import urljoin
 
 import httpx
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 from bs4 import BeautifulSoup
 
 from app.config.settings import get_settings
@@ -16,6 +18,8 @@ from app.schemas.forebet import (
     ForebetProbability,
 )
 
+logger = logging.getLogger("amen.forebet_acquisition")
+
 
 class ForebetAcquisitionError(RuntimeError):
     """Raised when Forebet returns a response that cannot be parsed safely."""
@@ -23,6 +27,13 @@ class ForebetAcquisitionError(RuntimeError):
 
 class ForebetAccessDeniedError(ForebetAcquisitionError):
     """Raised when Forebet explicitly rejects the request."""
+
+
+class ForebetBrowserChallengeError(ForebetAcquisitionError):
+    """Raised when browser acquisition reaches an access challenge."""
+
+
+_browser_semaphore = asyncio.Semaphore(1)
 
 
 def _text(node) -> str | None:
@@ -155,6 +166,57 @@ def _validate_forebet_html(html: str, content_type: str | None) -> None:
         raise ForebetAcquisitionError("Forebet returned an empty or malformed HTML response")
 
 
+def _validate_browser_forebet_html(html: str, final_url: str, expected_host: str) -> None:
+    from urllib.parse import urlparse
+    if urlparse(final_url).hostname != expected_host:
+        raise ForebetAcquisitionError("Forebet browser navigation left the configured domain")
+    lowered = html.lower()
+    challenge_markers = ("captcha", "verify you are human", "access denied", "cloudflare ray id", "attention required")
+    if any(marker in lowered for marker in challenge_markers):
+        raise ForebetBrowserChallengeError("Forebet presented an access-denied or CAPTCHA challenge")
+    _validate_forebet_html(html, "text/html")
+    if "forebet" not in lowered:
+        raise ForebetAcquisitionError("Browser response was not recognizable Forebet HTML")
+
+
+async def fetch_forebet_page_browser(url: str) -> str:
+    """Acquire one Forebet page with bounded headless Chromium navigation."""
+    from urllib.parse import urlparse
+    settings = get_settings()
+    expected_host = urlparse(settings.forebet_base_url).hostname
+    if urlparse(url).hostname != expected_host:
+        raise ForebetAcquisitionError("Browser fallback URL must belong to the configured Forebet domain")
+    timeout_ms = int(settings.forebet_browser_timeout * 1000)
+    logger.info("browser_fallback_attempted host=%s", expected_host)
+    async with _browser_semaphore:
+        try:
+            async with async_playwright() as playwright:
+                browser = await playwright.chromium.launch(headless=True, args=["--disable-dev-shm-usage", "--no-sandbox"])
+                try:
+                    context = await browser.new_context(user_agent=settings.forebet_user_agent, locale="en-US")
+                    page = await context.new_page()
+                    await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    try:
+                        await page.wait_for_selector(".schema, body", timeout=timeout_ms)
+                    except PlaywrightTimeoutError:
+                        pass
+                    html = await page.content()
+                    _validate_browser_forebet_html(html, page.url, expected_host or "")
+                    logger.info("browser_fallback_success host=%s", expected_host)
+                    return html
+                finally:
+                    await browser.close()
+        except PlaywrightTimeoutError as exc:
+            logger.warning("browser_fallback_failure reason=timeout host=%s", expected_host)
+            raise ForebetAcquisitionError("Forebet browser fallback timed out") from exc
+        except ForebetAcquisitionError:
+            logger.warning("browser_fallback_failure reason=validation host=%s", expected_host)
+            raise
+        except Exception as exc:
+            logger.warning("browser_fallback_failure reason=%s host=%s", type(exc).__name__, expected_host)
+            raise ForebetAcquisitionError(f"Forebet browser fallback failed: {type(exc).__name__}") from exc
+
+
 async def fetch_forebet_page(url: str, *, client: httpx.AsyncClient | None = None) -> str:
     settings = get_settings()
     owns_client = client is None
@@ -168,9 +230,16 @@ async def fetch_forebet_page(url: str, *, client: httpx.AsyncClient | None = Non
             try:
                 response = await http_client.get(url)
                 if response.status_code == 403:
-                    raise ForebetAccessDeniedError("Forebet rejected the request with HTTP 403")
+                    logger.warning("http_403 host=%s", response.request.url.host)
+                    if not settings.forebet_browser_fallback_enabled:
+                        raise ForebetAccessDeniedError("Forebet rejected the request with HTTP 403")
+                    try:
+                        return await fetch_forebet_page_browser(url)
+                    except ForebetAcquisitionError as exc:
+                        raise ForebetAccessDeniedError(f"Forebet HTTP 403 and browser fallback failed: {exc}") from exc
                 response.raise_for_status()
                 _validate_forebet_html(response.text, response.headers.get("content-type"))
+                logger.info("http_success host=%s", response.request.url.host)
                 return response.text
             except ForebetAccessDeniedError:
                 raise

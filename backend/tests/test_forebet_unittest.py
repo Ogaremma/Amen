@@ -140,8 +140,27 @@ def test_successful_html_acquisition_using_mocked_http():
 
 def test_403_is_explicit_access_denied():
     response = httpx.Response(403, text="Forbidden", request=httpx.Request("GET", SOURCE_URL))
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)), patch("app.services.forebet.get_settings") as settings:
+        settings.return_value.forebet_timeout = 1
+        settings.return_value.forebet_user_agent = "test"
+        settings.return_value.forebet_retries = 0
+        settings.return_value.forebet_retry_backoff = 0
+        settings.return_value.forebet_browser_fallback_enabled = False
         with pytest.raises(ForebetAccessDeniedError, match="HTTP 403"):
+            asyncio.run(fetch_forebet_page(SOURCE_URL))
+
+
+def test_403_uses_browser_fallback():
+    response = httpx.Response(403, text="Forbidden", request=httpx.Request("GET", SOURCE_URL))
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)), patch("app.services.forebet.fetch_forebet_page_browser", new=AsyncMock(return_value="<html><body>Forebet</body></html>")) as browser:
+        assert asyncio.run(fetch_forebet_page(SOURCE_URL)) == "<html><body>Forebet</body></html>"
+        browser.assert_awaited_once_with(SOURCE_URL)
+
+
+def test_browser_fallback_failure_remains_access_denied():
+    response = httpx.Response(403, text="Forbidden", request=httpx.Request("GET", SOURCE_URL))
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)), patch("app.services.forebet.fetch_forebet_page_browser", new=AsyncMock(side_effect=ForebetAcquisitionError("challenge"))):
+        with pytest.raises(ForebetAccessDeniedError, match="browser fallback failed"):
             asyncio.run(fetch_forebet_page(SOURCE_URL))
 
 

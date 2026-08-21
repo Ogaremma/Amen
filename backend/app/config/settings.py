@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     forebet_retry_backoff: float = Field(default=0.5, validation_alias="FOREBET_RETRY_BACKOFF", ge=0)
     forebet_draw_refresh_interval_seconds: float = Field(default=900.0, validation_alias="FOREBET_DRAW_REFRESH_INTERVAL_SECONDS", gt=0)
     forebet_draw_source_urls: str = Field(default="", validation_alias="FOREBET_DRAW_SOURCE_URLS")
+    forebet_browser_fallback_enabled: bool = Field(default=True, validation_alias="FOREBET_BROWSER_FALLBACK_ENABLED")
+    forebet_browser_timeout: float = Field(default=30.0, validation_alias="FOREBET_BROWSER_TIMEOUT", gt=0, le=120)
 
     # ---------------------------------------------------------
     # SportyBet
