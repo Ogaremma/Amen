@@ -9,10 +9,10 @@ describe('Phase 5A workspace navigation', () => {
   it('starts on the dashboard with only workspace cards', () => {
     render(<App />)
     expect(screen.getByRole('button', { name: 'Optimizer' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '39 Billion Analyzer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Forebet Analyzer' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Future Tool/i })).toBeInTheDocument()
     expect(screen.getByLabelText('SportyBet booking code')).not.toBeVisible()
-    expect(screen.getByText('No training data has been imported yet.')).not.toBeVisible()
+    expect(screen.queryByRole('textbox', { name: /Forebet predictions page URL/i })).not.toBeInTheDocument()
   })
 
   it('opens Optimizer as a dedicated view and returns to the dashboard', async () => {
@@ -26,15 +26,14 @@ describe('Phase 5A workspace navigation', () => {
     expect(screen.getByRole('button', { name: 'Optimizer' })).toBeVisible()
   })
 
-  it('shows an explicit analyzer empty state without collecting data', async () => {
+  it('opens the functional Forebet analyzer', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await user.click(screen.getByRole('button', { name: '39 Billion Analyzer' }))
+    await user.click(screen.getByRole('button', { name: 'Forebet Analyzer' }))
 
-    expect(screen.getByRole('heading', { name: '39 Billion Analyzer' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Import Booking Code' })).toBeDisabled()
-    expect(screen.getByText('No training data has been imported yet.')).toBeInTheDocument()
-    expect(screen.getByText('Empty-state values - no analysis has been performed.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Forebet Analyzer' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /Forebet predictions page URL/i })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Analyze Forebet' })).toBeEnabled()
     expect(screen.queryByLabelText('SportyBet booking code')).not.toBeVisible()
   })
 

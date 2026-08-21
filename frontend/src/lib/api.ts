@@ -11,7 +11,7 @@ function telegramHeaders(): HeadersInit {
   return initData ? { 'X-Telegram-Init-Data': initData } : {}
 }
 
-async function checkResponse(response: Response): Promise<BookingResponse> {
+async function checkResponse<T>(response: Response): Promise<T> {
   const text = await response.text()
   let body: unknown = null
   try {
@@ -28,7 +28,7 @@ async function checkResponse(response: Response): Promise<BookingResponse> {
     throw new Error(detail)
   }
 
-  return body as BookingResponse
+  return body as T
 }
 
 export async function fetchBookingByCode(bookingCode: string): Promise<BookingResponse> {
@@ -102,4 +102,53 @@ export async function fetchHistory(): Promise<HistoryItem[]> {
   const body = await response.json()
   if (!response.ok) throw new Error(body?.detail || 'Unable to load history')
   return body as HistoryItem[]
+}
+
+export type ForebetPredictionResult = 'HOME' | 'DRAW' | 'AWAY' | 'UNKNOWN'
+
+export interface ForebetProbability {
+  home: number | null
+  draw: number | null
+  away: number | null
+}
+
+export interface ForebetMatch {
+  match_id: string | null
+  home_team: string
+  away_team: string
+  competition: string | null
+  country: string | null
+  competition_code: string | null
+  kickoff: string | null
+  kickoff_display: string | null
+  match_url: string | null
+  predicted_result: ForebetPredictionResult
+  predicted_score_home: number | null
+  predicted_score_away: number | null
+  probabilities: ForebetProbability | null
+  average_goals: number | null
+  primary_coefficient: number | null
+  odds_home: number | null
+  odds_draw: number | null
+  odds_away: number | null
+  narrative: string | null
+  source: string
+  source_url: string | null
+}
+
+export interface ForebetAnalyzeResponse {
+  source_url: string
+  total_matches: number
+  draw_count: number
+  draw_matches: ForebetMatch[]
+  matches: ForebetMatch[]
+}
+
+export async function analyzeForebet(url: string): Promise<ForebetAnalyzeResponse> {
+  const response = await fetch(buildUrl('/forebet/analyze'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...telegramHeaders() },
+    body: JSON.stringify({ url }),
+  })
+  return checkResponse<ForebetAnalyzeResponse>(response)
 }
