@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from app.config.settings import get_settings
 from app.services.forebet_draw_engine import ForebetDrawEngine, forebet_draw_engine
@@ -15,6 +16,10 @@ class ForebetDrawRefreshWorker:
         self.engine = engine
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self.last_started: datetime | None = None
+        self.last_completed: datetime | None = None
+        self.last_failure: str | None = None
+        self.last_failure_stage: str | None = None
 
     @property
     def running(self) -> bool:
@@ -26,6 +31,7 @@ class ForebetDrawRefreshWorker:
             return
         self._stop = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name="forebet-draw-refresh-worker")
+        self.last_started = datetime.now(timezone.utc)
         logger.info("worker_started interval_seconds=%s", get_settings().forebet_draw_refresh_interval_seconds)
         await asyncio.sleep(0)
 
@@ -49,6 +55,9 @@ class ForebetDrawRefreshWorker:
             try:
                 before = {day.prediction_date: day.booking_code for day in self.engine.get_active_window().days}
                 response = await self.engine.refresh_window(source_urls)
+                self.last_completed = datetime.now(timezone.utc)
+                self.last_failure = None
+                self.last_failure_stage = None
                 after = {day.prediction_date: day.booking_code for day in response.days}
                 created = [code for day, code in after.items() if day not in before]
                 reused = [code for day, code in after.items() if before.get(day) == code]
@@ -56,7 +65,9 @@ class ForebetDrawRefreshWorker:
                 logger.info("refresh_completed active_prediction_dates=%s created=%s reused=%s replaced=%s", response.active_count, created, reused, replaced)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self.last_failure = f"{type(exc).__name__}: {str(exc)[:500]}"
+                self.last_failure_stage = "refresh_window"
                 logger.exception("refresh_failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=interval)

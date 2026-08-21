@@ -12,6 +12,7 @@ from app.services.forebet import fetch_forebet_page, get_draw_matches, parse_for
 from app.services.sportybet import create_draw_booking
 from app.schemas.forebet_draw_window import DrawWindowRefreshRequest, DrawWindowResponse
 from app.services.forebet_draw_engine import forebet_draw_engine
+from app.services.forebet_draw_diagnostics import run_forebet_draw_diagnostics
 
 router = APIRouter(prefix="/api/v1/forebet", tags=["forebet"])
 
@@ -68,6 +69,12 @@ async def book_draws(request: DrawBookingRequest) -> DrawBookingResponse:
 @router.get("/draw-window", response_model=DrawWindowResponse)
 async def get_draw_window() -> DrawWindowResponse:
     return forebet_draw_engine.get_active_window()
+
+
+@router.get("/draw-window/diagnostics")
+async def get_draw_window_diagnostics() -> dict:
+    """Run the provider/matching pipeline without booking or state mutation."""
+    return await run_forebet_draw_diagnostics()
 
 
 @router.post("/draw-window/refresh", response_model=DrawWindowResponse)
