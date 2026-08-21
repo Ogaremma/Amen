@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 
 from app.config.settings import get_settings
 from app.schemas.forebet import DrawBookingRequest, DrawBookingResponse, ForebetAnalyzeRequest, ForebetAnalyzeResponse, FixtureMatchDateGroup, SportyBetEvent
@@ -13,8 +13,22 @@ from app.services.sportybet import create_draw_booking
 from app.schemas.forebet_draw_window import DrawWindowRefreshRequest, DrawWindowResponse
 from app.services.forebet_draw_engine import forebet_draw_engine
 from app.services.forebet_draw_diagnostics import run_forebet_draw_diagnostics
+from app.schemas.forebet_ingestion import ForebetAcquisitionSnapshotRequest
+from app.services.forebet_ingestion import dry_run_snapshot
 
 router = APIRouter(prefix="/api/v1/forebet", tags=["forebet"])
+
+def _verify_ingestion_token(authorization: str | None) -> None:
+    expected = get_settings().forebet_ingestion_token
+    if not expected or authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Forebet ingestion authentication required")
+
+@router.post("/acquisition-snapshots")
+async def ingest_acquisition_snapshots(request: ForebetAcquisitionSnapshotRequest, authorization: str | None = Header(default=None)) -> dict:
+    _verify_ingestion_token(authorization)
+    if not request.dry_run:
+        raise HTTPException(status_code=409, detail="Live ingestion is disabled until booking activation is explicitly implemented")
+    return await dry_run_snapshot(request)
 
 
 class ForebetMatchesRequest(ForebetAnalyzeRequest):
