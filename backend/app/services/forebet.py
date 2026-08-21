@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import asyncio
 import logging
+import time
 from datetime import date, datetime
 from typing import Iterable
 from urllib.parse import urljoin
@@ -34,6 +35,15 @@ class ForebetBrowserChallengeError(ForebetAcquisitionError):
 
 
 _browser_semaphore = asyncio.Semaphore(1)
+
+
+def _redirect_count(request) -> int:
+    count = 0
+    current = request.redirected_from
+    while current is not None:
+        count += 1
+        current = current.redirected_from
+    return count
 
 
 def _text(node) -> str | None:
@@ -171,7 +181,7 @@ def _validate_browser_forebet_html(html: str, final_url: str, expected_host: str
     if urlparse(final_url).hostname != expected_host:
         raise ForebetAcquisitionError("Forebet browser navigation left the configured domain")
     lowered = html.lower()
-    challenge_markers = ("captcha", "verify you are human", "access denied", "cloudflare ray id", "attention required")
+    challenge_markers = ("captcha", "verify you are human", "access denied", "cloudflare ray id", "attention required", "just a moment")
     if any(marker in lowered for marker in challenge_markers):
         raise ForebetBrowserChallengeError("Forebet presented an access-denied or CAPTCHA challenge")
     _validate_forebet_html(html, "text/html")
@@ -200,12 +210,24 @@ async def fetch_forebet_page_browser(url: str) -> str:
                 try:
                     context = await browser.new_context(user_agent=settings.forebet_user_agent, locale="en-US")
                     page = await context.new_page()
-                    await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    started = time.monotonic()
+                    response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
                     try:
                         await page.wait_for_selector(".schema, body", timeout=timeout_ms)
                     except PlaywrightTimeoutError:
                         pass
                     html = await page.content()
+                    title = (await page.title()).strip()[:120]
+                    has_schema = await page.locator(".schema").count() > 0
+                    fixture_rows = await page.locator(".schema > .rcnt").count()
+                    content_type = response.headers.get("content-type") if response else None
+                    final_host = urlparse(page.url).hostname
+                    redirect_count = _redirect_count(response.request) if response else 0
+                    logger.info(
+                        "browser_navigation status=%s content_type=%s title=%r final_host=%s schema=%s fixture_rows=%s redirects=%s duration_ms=%s",
+                        response.status if response else None, content_type, title, final_host, has_schema,
+                        fixture_rows, redirect_count, int((time.monotonic() - started) * 1000),
+                    )
                     _validate_browser_forebet_html(html, page.url, expected_host or "")
                     logger.info("browser_fallback_success host=%s", expected_host)
                     return html
