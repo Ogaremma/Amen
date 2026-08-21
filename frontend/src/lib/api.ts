@@ -152,3 +152,38 @@ export async function analyzeForebet(url: string): Promise<ForebetAnalyzeRespons
   })
   return checkResponse<ForebetAnalyzeResponse>(response)
 }
+
+export interface ForebetDrawWindowMatch {
+  event_id: string
+  home_team: string
+  away_team: string
+  kickoff: string
+  match_status: string | null
+  market_id: string
+  outcome_id: string
+  product_id: number
+  sport_id: string
+  specifier: string | null
+}
+
+export interface ForebetDrawWindowDay {
+  prediction_date: string
+  booking_code: string
+  selection_count: number
+  status: 'active' | 'complete' | 'error'
+  matches: ForebetDrawWindowMatch[]
+  source_urls: string[]
+  diagnostics: string[]
+  created_at: string
+  last_updated: string
+}
+
+export interface ForebetDrawWindowResponse {
+  days: ForebetDrawWindowDay[]
+  active_count: number
+}
+
+export async function getForebetDrawWindow(): Promise<ForebetDrawWindowResponse> {
+  const response = await fetch(buildUrl('/forebet/draw-window'), { headers: telegramHeaders() })
+  return checkResponse<ForebetDrawWindowResponse>(response)
+}

@@ -109,3 +109,16 @@ class FixtureMatchResult(BaseModel):
 class FixtureMatchDateGroup(BaseModel):
     date: date
     results: list[FixtureMatchResult]
+
+
+class DrawBookingRequest(BaseModel):
+    fixtures: list[FixtureMatchResult] = Field(min_length=1)
+
+
+class DrawBookingResponse(BaseModel):
+    booking_code: str
+    selection_count: int
+    event_ids: list[str]
+    teams: list[str]
+    source_dates: list[date]
+    total_odds: float | None = None

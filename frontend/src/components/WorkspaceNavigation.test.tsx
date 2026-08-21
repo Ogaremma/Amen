@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 
 describe('Phase 5A workspace navigation', () => {
@@ -27,13 +27,14 @@ describe('Phase 5A workspace navigation', () => {
   })
 
   it('opens the functional Forebet analyzer', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ days: [], active_count: 0 }), { status: 200 }))
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Forebet Analyzer' }))
 
-    expect(screen.getByRole('heading', { name: 'Forebet Analyzer' })).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: /Forebet predictions page URL/i })).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Analyze Forebet' })).toBeEnabled()
+    expect(screen.getByRole('heading', { name: 'Forebet Draw Analyzer' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(await screen.findByText(/No active Forebet draw prediction days/i)).toBeVisible()
     expect(screen.queryByLabelText('SportyBet booking code')).not.toBeVisible()
   })
 

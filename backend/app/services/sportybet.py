@@ -13,7 +13,12 @@ from fastapi import HTTPException
 
 from app.config.settings import get_settings
 from app.schemas.booking import BookingResponse, BookingSelection
-from app.schemas.forebet import SportyBetEvent
+from app.schemas.forebet import (
+    DrawBookingResponse,
+    FixtureMatchResult,
+    FixtureMatchStatus,
+    SportyBetEvent,
+)
 
 logger = logging.getLogger("amen.sportybet")
 
@@ -573,6 +578,49 @@ async def _create_share_code(selections: list[dict[str, Any]]) -> str:
         )
 
     return share_code
+
+
+def _draw_selection(event: SportyBetEvent) -> dict[str, Any]:
+    """Build the verified 1X2 DRAW identity used by SportyBet booking."""
+    if event.market_id != "1":
+        raise HTTPException(status_code=422, detail=f"Event {event.event_id} has no valid 1X2 market")
+    if event.outcome_draw_id != "2":
+        raise HTTPException(status_code=422, detail=f"Event {event.event_id} has no valid DRAW outcome")
+    if event.product_id is None or not event.sport_id:
+        raise HTTPException(status_code=422, detail=f"Event {event.event_id} is missing booking identity")
+    if (event.match_status or "").strip().lower() in {"live", "in play", "started", "playing", "ended", "finished", "complete", "completed", "closed", "cancelled", "canceled"}:
+        raise HTTPException(status_code=422, detail=f"Event {event.event_id} is not pre-match")
+    selection: dict[str, Any] = {
+        "eventId": event.event_id,
+        "marketId": "1",
+        "outcomeId": "2",
+        "productId": event.product_id,
+        "sportId": event.sport_id,
+    }
+    if event.specifier:
+        selection["specifier"] = event.specifier
+    return selection
+
+
+async def create_draw_booking(fixtures: list[FixtureMatchResult]) -> DrawBookingResponse:
+    if not fixtures:
+        raise HTTPException(status_code=422, detail="At least one matched DRAW fixture is required")
+    selections: list[dict[str, Any]] = []
+    events: list[SportyBetEvent] = []
+    for fixture in fixtures:
+        if fixture.status not in {FixtureMatchStatus.MATCHED_EXACT, FixtureMatchStatus.MATCHED_NORMALIZED, FixtureMatchStatus.MATCHED_FUZZY} or fixture.sportybet_event is None:
+            raise HTTPException(status_code=422, detail="Only successfully matched fixtures can be booked")
+        event = fixture.sportybet_event
+        selections.append(_draw_selection(event))
+        events.append(event)
+    booking_code = await _create_share_code(selections)
+    return DrawBookingResponse(
+        booking_code=booking_code,
+        selection_count=len(events),
+        event_ids=[event.event_id for event in events],
+        teams=[f"{event.home_team} vs {event.away_team}" for event in events],
+        source_dates=sorted({event.kickoff.date() for event in events}),
+    )
 
 
 async def rebook_without_events(booking_code: str, event_ids: list[str]) -> BookingResponse:

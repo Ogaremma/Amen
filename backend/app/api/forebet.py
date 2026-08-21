@@ -6,9 +6,12 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException
 
 from app.config.settings import get_settings
-from app.schemas.forebet import ForebetAnalyzeRequest, ForebetAnalyzeResponse, FixtureMatchDateGroup, SportyBetEvent
+from app.schemas.forebet import DrawBookingRequest, DrawBookingResponse, ForebetAnalyzeRequest, ForebetAnalyzeResponse, FixtureMatchDateGroup, SportyBetEvent
 from app.services.fixture_matching import match_forebet_fixtures
 from app.services.forebet import fetch_forebet_page, get_draw_matches, parse_forebet_html
+from app.services.sportybet import create_draw_booking
+from app.schemas.forebet_draw_window import DrawWindowRefreshRequest, DrawWindowResponse
+from app.services.forebet_draw_engine import forebet_draw_engine
 
 router = APIRouter(prefix="/api/v1/forebet", tags=["forebet"])
 
@@ -55,3 +58,23 @@ async def match_forebet_draws(request: ForebetMatchesRequest) -> list[FixtureMat
         return [FixtureMatchDateGroup(date=match_date, results=items) for match_date, items in sorted(grouped.items())]
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Unable to analyze Forebet fixtures: {exc}") from exc
+
+
+@router.post("/book-draws", response_model=DrawBookingResponse)
+async def book_draws(request: DrawBookingRequest) -> DrawBookingResponse:
+    return await create_draw_booking(request.fixtures)
+
+
+@router.get("/draw-window", response_model=DrawWindowResponse)
+async def get_draw_window() -> DrawWindowResponse:
+    return forebet_draw_engine.get_active_window()
+
+
+@router.post("/draw-window/refresh", response_model=DrawWindowResponse)
+async def refresh_draw_window(request: DrawWindowRefreshRequest) -> DrawWindowResponse:
+    return await forebet_draw_engine.refresh_window(request.source_urls, request.start_datetime, request.end_datetime)
+
+
+@router.post("/draw-window/{prediction_date}/refresh", response_model=DrawWindowResponse)
+async def refresh_draw_window_day(prediction_date: date, request: DrawWindowRefreshRequest) -> DrawWindowResponse:
+    return await forebet_draw_engine.refresh_day(prediction_date, request.source_urls, request.start_datetime, request.end_datetime)
