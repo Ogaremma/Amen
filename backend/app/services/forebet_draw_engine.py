@@ -35,13 +35,21 @@ class ForebetDrawEngine:
             forebet_matches = []
             for url, html in zip(source_urls, html_pages): forebet_matches.extend(parse_forebet_html(html, url))
             sportybet = await get_upcoming_football_events(start_datetime=start_datetime, end_datetime=end_datetime)
-            results = match_forebet_fixtures(forebet_matches, sportybet.events)
+            # Preserve every explicit Forebet DRAW; booking receives all validated matches.
+            by_day: dict[date, list] = defaultdict(list)
+            for match in forebet_matches:
+                if match.predicted_result.value != "DRAW" or match.kickoff is None:
+                    continue
+                day = match.kickoff.date() if isinstance(match.kickoff, datetime) else match.kickoff
+                by_day[day].append(match)
+            selected = [match for day in sorted(by_day) for match in by_day[day]]
+            results = match_forebet_fixtures(selected, sportybet.events)
             grouped: dict[date, list[FixtureMatchResult]] = defaultdict(list)
             diagnostics: dict[date, list[str]] = defaultdict(list)
             for result in results:
                 kickoff = result.forebet_match.kickoff
                 if kickoff is None: continue
-                day = kickoff.date()
+                day = kickoff.date() if isinstance(kickoff, datetime) else kickoff
                 if result.status in {FixtureMatchStatus.MATCHED_EXACT, FixtureMatchStatus.MATCHED_NORMALIZED, FixtureMatchStatus.MATCHED_FUZZY} and result.sportybet_event and result.sportybet_event.market_id == "1" and result.sportybet_event.outcome_draw_id == "2" and result.sportybet_event.product_id is not None and result.sportybet_event.sport_id:
                     grouped[day].append(result)
                 else:

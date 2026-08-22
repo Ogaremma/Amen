@@ -11,6 +11,7 @@ from app.services.forebet_draw_worker import forebet_draw_worker
 
 settings = get_settings()
 
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await forebet_draw_worker.start()

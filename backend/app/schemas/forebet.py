@@ -105,6 +105,15 @@ class FixtureMatchResult(BaseModel):
     sportybet_event: SportyBetEvent | None = None
     candidates: list[SportyBetEvent] = Field(default_factory=list)
     reason: str | None = None
+    home_similarity: float | None = None
+    away_similarity: float | None = None
+    minimum_team_similarity: float | None = None
+    average_team_similarity: float | None = None
+    competition_similarity: float | None = None
+    kickoff_delta_hours: float | None = None
+    same_lagos_date: bool | None = None
+    same_direction: bool | None = None
+    candidate_margin: float | None = None
 
 class FixtureMatchDateGroup(BaseModel):
     date: date

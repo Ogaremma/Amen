@@ -153,6 +153,17 @@ def get_draw_matches(matches: Iterable[ForebetMatch]) -> list[ForebetMatch]:
     return [match for match in matches if is_draw_prediction(match.predicted_result)]
 
 
+def rank_draw_matches(matches: Iterable[ForebetMatch], limit: int) -> list[ForebetMatch]:
+    """Rank explicit DRAW predictions by Forebet draw probability.
+
+    Matches without a published draw probability sort after scored matches and
+    retain stable source order. The limit is deliberately explicit/configured.
+    """
+    draws = get_draw_matches(matches)
+    ranked = sorted(enumerate(draws), key=lambda item: (item[1].probabilities.draw if item[1].probabilities and item[1].probabilities.draw is not None else float("-inf"), -item[0]), reverse=True)
+    return [match for _, match in ranked[:limit]]
+
+
 def _forebet_headers(url: str, user_agent: str) -> dict[str, str]:
     return {
         "User-Agent": user_agent,

@@ -19,6 +19,7 @@ from app.services.forebet import (
     is_draw_prediction,
     normalize_team_name,
     parse_forebet_html,
+    rank_draw_matches,
 )
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -114,6 +115,14 @@ def test_draw_helpers(matches):
     draws = get_draw_matches(matches)
     assert draws
     assert all(match.predicted_result == ForebetPredictionResult.DRAW for match in draws)
+
+
+def test_rank_draw_matches_uses_forebet_draw_probability(matches):
+    ranked = rank_draw_matches(matches, 3)
+    assert len(ranked) == 3
+    assert all(match.predicted_result == ForebetPredictionResult.DRAW for match in ranked)
+    probabilities = [match.probabilities.draw for match in ranked]
+    assert probabilities == sorted(probabilities, reverse=True)
 
 
 def test_network_failure():

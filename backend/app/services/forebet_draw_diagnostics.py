@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import func, inspect, select
 
 from app.config.settings import get_settings
 from app.schemas.forebet import FixtureMatchStatus
 from app.services.fixture_matching import match_forebet_fixtures
-from app.services.forebet import fetch_forebet_page, get_draw_matches, parse_forebet_html
+from app.services.forebet import fetch_forebet_page, get_draw_matches, parse_forebet_html, rank_draw_matches
 from app.services.forebet_dates import future_prediction_dates, future_prediction_urls
 from app.services.forebet_draw_store import daily, forebet_draw_store, revisions
 from app.services.forebet_draw_worker import forebet_draw_worker
@@ -45,6 +45,7 @@ async def run_forebet_draw_diagnostics() -> dict:
         "sportybet": {"events_retrieved": 0, "football_events": 0, "total_num": None, "error": None},
         "matching": {"matched_exact": 0, "matched_normalized": 0, "matched_fuzzy": 0, "unmatched": 0, "ambiguous": 0},
         "booking_candidates": {"dates_with_valid_candidates": 0, "total_valid_selections": 0, "validation_errors": 0},
+        "selections": [],
         "database": database_diagnostics(),
         "worker_execution": {"last_started": forebet_draw_worker.last_started, "last_completed": forebet_draw_worker.last_completed, "last_failure": forebet_draw_worker.last_failure, "last_failure_stage": forebet_draw_worker.last_failure_stage},
     }
@@ -59,7 +60,16 @@ async def run_forebet_draw_diagnostics() -> dict:
             report["forebet"]["errors"].append(_failure("forebet_acquisition", exc))
     draws = get_draw_matches(matches)
     report["forebet"]["draw_matches"] = len(draws)
-    if not draws:
+    selected_by_date: dict[date, list] = {}
+    for match in draws:
+        if match.kickoff is None:
+            continue
+        day = match.kickoff.date() if isinstance(match.kickoff, datetime) else match.kickoff
+        selected_by_date.setdefault(day, []).append(match)
+    selected = [match for day in sorted(selected_by_date) for match in rank_draw_matches(selected_by_date[day], settings.forebet_draw_selection_limit)]
+    report["forebet"]["selected_draw_matches"] = len(selected)
+    report["forebet"]["selection_limit_per_day"] = settings.forebet_draw_selection_limit
+    if not selected:
         return report
     try:
         upcoming = await get_upcoming_football_events()
@@ -70,7 +80,7 @@ async def run_forebet_draw_diagnostics() -> dict:
     except Exception as exc:
         report["sportybet"]["error"] = _failure("sportybet_acquisition", exc)
         return report
-    results = match_forebet_fixtures(draws, events)
+    results = match_forebet_fixtures(selected, events)
     counts = Counter(result.status for result in results)
     report["matching"].update({
         "matched_exact": counts[FixtureMatchStatus.MATCHED_EXACT],
@@ -81,6 +91,22 @@ async def run_forebet_draw_diagnostics() -> dict:
     })
     valid_dates = set()
     for result in results:
+        forebet = result.forebet_match
+        event = result.sportybet_event
+        report["selections"].append({
+            "prediction_date": (forebet.kickoff.date() if isinstance(forebet.kickoff, datetime) else forebet.kickoff).isoformat() if forebet.kickoff else None,
+            "home_team": forebet.home_team,
+            "away_team": forebet.away_team,
+            "draw_probability": forebet.probabilities.draw if forebet.probabilities else None,
+            "status": result.status.value,
+            "matching_method": result.matching_method,
+            "matching_confidence": result.matching_confidence,
+            "sportybet_event_id": event.event_id if event else None,
+            "sportybet_kickoff": event.kickoff.isoformat() if event else None,
+            "draw_outcome_id": event.outcome_draw_id if event else None,
+            "booking_candidate": False,
+            "reason": result.reason,
+        })
         if result.sportybet_event is None:
             continue
         try:
@@ -89,6 +115,7 @@ async def run_forebet_draw_diagnostics() -> dict:
             if kickoff is not None:
                 valid_dates.add(kickoff.date() if isinstance(kickoff, datetime) else kickoff)
             report["booking_candidates"]["total_valid_selections"] += 1
+            report["selections"][-1]["booking_candidate"] = True
         except Exception:
             report["booking_candidates"]["validation_errors"] += 1
     report["booking_candidates"]["dates_with_valid_candidates"] = len(valid_dates)

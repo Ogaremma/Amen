@@ -14,7 +14,7 @@ from app.schemas.forebet_draw_window import DrawWindowRefreshRequest, DrawWindow
 from app.services.forebet_draw_engine import forebet_draw_engine
 from app.services.forebet_draw_diagnostics import run_forebet_draw_diagnostics
 from app.schemas.forebet_ingestion import ForebetAcquisitionSnapshotRequest
-from app.services.forebet_ingestion import dry_run_snapshot
+from app.services.forebet_ingestion import dry_run_snapshot, execute_snapshot
 
 router = APIRouter(prefix="/api/v1/forebet", tags=["forebet"])
 
@@ -26,9 +26,12 @@ def _verify_ingestion_token(authorization: str | None) -> None:
 @router.post("/acquisition-snapshots")
 async def ingest_acquisition_snapshots(request: ForebetAcquisitionSnapshotRequest, authorization: str | None = Header(default=None)) -> dict:
     _verify_ingestion_token(authorization)
-    if not request.dry_run:
-        raise HTTPException(status_code=409, detail="Live ingestion is disabled until booking activation is explicitly implemented")
-    return await dry_run_snapshot(request)
+    settings = get_settings()
+    if request.dry_run:
+        return await dry_run_snapshot(request)
+    if not settings.forebet_draw_booking_enabled:
+        raise HTTPException(status_code=409, detail="Forebet draw booking is disabled")
+    return await execute_snapshot(request)
 
 
 class ForebetMatchesRequest(ForebetAnalyzeRequest):
