@@ -66,9 +66,9 @@ async def run_forebet_draw_diagnostics() -> dict:
             continue
         day = match.kickoff.date() if isinstance(match.kickoff, datetime) else match.kickoff
         selected_by_date.setdefault(day, []).append(match)
-    selected = [match for day in sorted(selected_by_date) for match in rank_draw_matches(selected_by_date[day], settings.forebet_draw_selection_limit)]
+    selected = [match for day in sorted(selected_by_date) for match in rank_draw_matches(selected_by_date[day], limit=None)]
     report["forebet"]["selected_draw_matches"] = len(selected)
-    report["forebet"]["selection_limit_per_day"] = settings.forebet_draw_selection_limit
+    report["forebet"]["selection_limit_per_day"] = None
     if not selected:
         return report
     try:

@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 from app.schemas.forebet import FixtureMatchResult, FixtureMatchStatus
 from app.schemas.forebet_draw_window import DrawWindowDay, DrawWindowMatch, DrawWindowResponse
+from app.config.settings import get_settings
 from app.services.fixture_matching import match_forebet_fixtures
 from app.services.forebet import fetch_forebet_page, parse_forebet_html
 from app.services.forebet_draw_store import ForebetDrawStore, forebet_draw_store
@@ -63,6 +64,9 @@ class ForebetDrawEngine:
                 matches = [self._window_match(item) for item in deduped.values()]
                 existing = current.get(day)
                 if existing and self._identity(existing.matches) == self._identity(matches): continue
+                if not get_settings().forebet_draw_booking_enabled:
+                    diagnostics[day].append("booking disabled by FOREBET_DRAW_BOOKING_ENABLED")
+                    continue
                 booking = await create_draw_booking(list(deduped.values()))
                 self.store.promote(day, booking.booking_code, matches, source_urls, diagnostics[day])
             self.store.complete_not_in(set(usable_dates))

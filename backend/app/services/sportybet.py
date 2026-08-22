@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -69,7 +70,9 @@ def _parse_upcoming_event(raw: Any) -> SportyBetEvent | None:
     sport = raw.get("sport") if isinstance(raw.get("sport"), dict) else {}
     category = sport.get("category") if isinstance(sport.get("category"), dict) else {}
     tournament = (
-        category.get("tournament") if isinstance(category.get("tournament"), dict) else {}
+        category.get("tournament")
+        if isinstance(category.get("tournament"), dict)
+        else {}
     )
     market = next(
         (
@@ -124,18 +127,28 @@ def _parse_upcoming_event(raw: Any) -> SportyBetEvent | None:
         odds_home=_to_float(home_outcome.get("odds")) if home_outcome else None,
         odds_draw=_to_float(draw_outcome.get("odds")) if draw_outcome else None,
         odds_away=_to_float(away_outcome.get("odds")) if away_outcome else None,
-        probability_home=_to_float(home_outcome.get("probability")) if home_outcome else None,
-        probability_draw=_to_float(draw_outcome.get("probability")) if draw_outcome else None,
-        probability_away=_to_float(away_outcome.get("probability")) if away_outcome else None,
+        probability_home=_to_float(home_outcome.get("probability"))
+        if home_outcome
+        else None,
+        probability_draw=_to_float(draw_outcome.get("probability"))
+        if draw_outcome
+        else None,
+        probability_away=_to_float(away_outcome.get("probability"))
+        if away_outcome
+        else None,
     )
 
 
 def parse_upcoming_events_page(payload: Any) -> SportyBetUpcomingEventsResult:
     if not isinstance(payload, dict) or payload.get("bizCode") != _BIZ_CODE_OK:
-        raise HTTPException(status_code=502, detail="Invalid SportyBet upcoming-events response")
+        raise HTTPException(
+            status_code=502, detail="Invalid SportyBet upcoming-events response"
+        )
     data = payload.get("data")
     if not isinstance(data, dict) or not isinstance(data.get("tournaments", []), list):
-        raise HTTPException(status_code=502, detail="Invalid SportyBet upcoming-events response")
+        raise HTTPException(
+            status_code=502, detail="Invalid SportyBet upcoming-events response"
+        )
     events: list[SportyBetEvent] = []
     for tournament in data.get("tournaments", []):
         if not isinstance(tournament, dict):
@@ -151,7 +164,74 @@ def _upcoming_url() -> str:
     return f"{settings.sportybet_base_url.rstrip('/')}/{settings.sportybet_upcoming_path.strip('/')}"
 
 
-async def _fetch_upcoming_page(page_num: int, page_size: int) -> SportyBetUpcomingEventsResult:
+async def _fetch_upcoming_page(
+    page_num: int,
+    page_size: int,
+) -> SportyBetUpcomingEventsResult:
+    max_attempts = 3
+    backoff = 0.75
+
+    for attempt in range(max_attempts):
+        try:
+            response = await _request_upcoming_page(page_num, page_size)
+
+            if response.status_code == 200:
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    if attempt == max_attempts - 1:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="Invalid SportyBet response",
+                        ) from exc
+
+                    await asyncio.sleep(backoff * (2**attempt))
+                    continue
+
+                logger.info(
+                    "sportybet_upcoming_page_success page=%s attempt=%s status=%s",
+                    page_num,
+                    attempt + 1,
+                    response.status_code,
+                )
+
+                return parse_upcoming_events_page(payload)
+
+            logger.warning(
+                "sportybet_upcoming_page_failed page=%s attempt=%s status=%s",
+                page_num,
+                attempt + 1,
+                response.status_code,
+            )
+
+        except httpx.TimeoutException:
+            logger.warning(
+                "sportybet_upcoming_page_timeout page=%s attempt=%s",
+                page_num,
+                attempt + 1,
+            )
+
+        except httpx.RequestError as exc:
+            logger.warning(
+                "sportybet_upcoming_page_request_error page=%s attempt=%s error=%s",
+                page_num,
+                attempt + 1,
+                type(exc).__name__,
+            )
+
+        if attempt < max_attempts - 1:
+            await asyncio.sleep(backoff * (2**attempt))
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"Unable to fetch SportyBet upcoming events page {page_num}",
+    )
+
+
+async def _request_upcoming_page(
+    page_num: int,
+    page_size: int,
+) -> httpx.Response:
     params = {
         "sportId": settings.sportybet_football_sport_id,
         "marketId": settings.sportybet_upcoming_market_ids,
@@ -159,20 +239,13 @@ async def _fetch_upcoming_page(page_num: int, page_size: int) -> SportyBetUpcomi
         "pageNum": page_num,
         "_t": int(time.time() * 1000),
     }
-    try:
-        async with httpx.AsyncClient(timeout=settings.sportybet_timeout) as client:
-            response = await client.get(_upcoming_url(), params=params, headers=_headers())
-    except httpx.TimeoutException as exc:
-        raise HTTPException(status_code=504, detail="SportyBet request timed out") from exc
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail="Unable to reach SportyBet") from exc
-    if response.status_code != 200:
-        raise HTTPException(status_code=502, detail="Unable to fetch upcoming events from SportyBet")
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail="Invalid SportyBet response") from exc
-    return parse_upcoming_events_page(payload)
+
+    async with httpx.AsyncClient(timeout=settings.sportybet_timeout) as client:
+        return await client.get(
+            _upcoming_url(),
+            params=params,
+            headers=_headers(),
+        )
 
 
 async def get_upcoming_football_events(
@@ -189,9 +262,9 @@ async def get_upcoming_football_events(
     def as_utc(value: datetime | None) -> datetime | None:
         if value is None:
             return None
-        return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(
-            timezone.utc
-        )
+        return (
+            value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        ).astimezone(timezone.utc)
 
     start, end = as_utc(start_datetime), as_utc(end_datetime)
     if start and end and start > end:
@@ -209,7 +282,8 @@ async def get_upcoming_football_events(
     filtered = [
         event
         for event in all_events
-        if (start is None or event.kickoff >= start) and (end is None or event.kickoff <= end)
+        if (start is None or event.kickoff >= start)
+        and (end is None or event.kickoff <= end)
     ]
     return SportyBetUpcomingEventsResult(total_num, filtered)
 
@@ -218,10 +292,27 @@ def determine_game_status(
     raw_status: Any, kickoff: datetime, now: datetime | None = None
 ) -> str:
     """Normalize SportyBet status, with a conservative time fallback."""
-    normalized = " ".join(str(raw_status or "").strip().lower().replace("_", " ").split())
-    upcoming = {"not start", "not started", "scheduled", "upcoming", "pre match", "prematch"}
+    normalized = " ".join(
+        str(raw_status or "").strip().lower().replace("_", " ").split()
+    )
+    upcoming = {
+        "not start",
+        "not started",
+        "scheduled",
+        "upcoming",
+        "pre match",
+        "prematch",
+    }
     live = {"live", "in progress", "in play", "started", "playing"}
-    ended = {"ended", "finished", "complete", "completed", "closed", "cancelled", "canceled"}
+    ended = {
+        "ended",
+        "finished",
+        "complete",
+        "completed",
+        "closed",
+        "cancelled",
+        "canceled",
+    }
     if normalized in upcoming:
         return "upcoming"
     if normalized in live:
@@ -262,7 +353,9 @@ def determine_result_status(game_status: str, picked: dict[str, Any]) -> str:
 
 def calculate_remaining_odds(selections: list[BookingSelection]) -> float:
     """Multiply finite, positive odds for upcoming games only."""
-    upcoming = [selection for selection in selections if selection.game_status == "upcoming"]
+    upcoming = [
+        selection for selection in selections if selection.game_status == "upcoming"
+    ]
     if not upcoming:
         return 0.0
 
@@ -296,7 +389,9 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def _match_market(outcome: dict[str, Any], selection: dict[str, Any]) -> dict[str, Any] | None:
+def _match_market(
+    outcome: dict[str, Any], selection: dict[str, Any]
+) -> dict[str, Any] | None:
     """Find the market on an outcome that corresponds to the ticket selection.
 
     Matches on market id, and additionally on specifier when the selection
@@ -306,7 +401,9 @@ def _match_market(outcome: dict[str, Any], selection: dict[str, Any]) -> dict[st
     market_id = str(selection.get("marketId"))
     selection_specifier = selection.get("specifier")
 
-    id_matches = [m for m in outcome.get("markets", []) if str(m.get("id")) == market_id]
+    id_matches = [
+        m for m in outcome.get("markets", []) if str(m.get("id")) == market_id
+    ]
     if not id_matches:
         return None
 
@@ -324,11 +421,17 @@ def _match_market(outcome: dict[str, Any], selection: dict[str, Any]) -> dict[st
         return no_specifier[0]
     if len(id_matches) == 1:
         return id_matches[0]
-    logger.warning("Ambiguous market %s for event %s without specifier", market_id, selection.get("eventId"))
+    logger.warning(
+        "Ambiguous market %s for event %s without specifier",
+        market_id,
+        selection.get("eventId"),
+    )
     return None
 
 
-def _match_outcome(market: dict[str, Any], selection: dict[str, Any]) -> dict[str, Any] | None:
+def _match_outcome(
+    market: dict[str, Any], selection: dict[str, Any]
+) -> dict[str, Any] | None:
     """Find the specific selected outcome within a market by outcome id."""
     outcome_id = str(selection.get("outcomeId"))
     for candidate in market.get("outcomes", []):
@@ -349,7 +452,9 @@ def _build_selection(
 
     market = _match_market(event, selection)
     if market is None:
-        logger.warning("No market %s found for event %s", selection.get("marketId"), event_id)
+        logger.warning(
+            "No market %s found for event %s", selection.get("marketId"), event_id
+        )
         return None
 
     picked = _match_outcome(market, selection)
@@ -369,7 +474,9 @@ def _build_selection(
     try:
         kickoff = datetime.fromtimestamp(int(start_ms) / 1000, tz=timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
-        logger.warning("Invalid estimateStartTime %r for event %s; skipping", start_ms, event_id)
+        logger.warning(
+            "Invalid estimateStartTime %r for event %s; skipping", start_ms, event_id
+        )
         return None
 
     sport = event.get("sport", {}) or {}
@@ -414,12 +521,19 @@ def parse_booking(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=502, detail="Unexpected SportyBet response")
 
-    if payload.get("isAvailable") is False or payload.get("bizCode") not in (None, _BIZ_CODE_OK):
-        raise HTTPException(status_code=404, detail="Booking code not found or unavailable")
+    if payload.get("isAvailable") is False or payload.get("bizCode") not in (
+        None,
+        _BIZ_CODE_OK,
+    ):
+        raise HTTPException(
+            status_code=404, detail="Booking code not found or unavailable"
+        )
 
     data = payload.get("data")
     if not isinstance(data, dict):
-        raise HTTPException(status_code=404, detail="Booking code not found or unavailable")
+        raise HTTPException(
+            status_code=404, detail="Booking code not found or unavailable"
+        )
 
     ticket = data.get("ticket") or {}
     ticket_selections = ticket.get("selections") or []
@@ -429,7 +543,9 @@ def parse_booking(
         logger.warning("Booking %s returned no outcomes", booking_code)
 
     outcomes_by_event: dict[str, dict[str, Any]] = {
-        o.get("eventId"): o for o in outcomes if isinstance(o, dict) and o.get("eventId")
+        o.get("eventId"): o
+        for o in outcomes
+        if isinstance(o, dict) and o.get("eventId")
     }
 
     resolved: list[BookingSelection] = []
@@ -438,7 +554,9 @@ def parse_booking(
             continue
         event = outcomes_by_event.get(selection.get("eventId"))
         if event is None:
-            logger.warning("No outcome found for selection event %s", selection.get("eventId"))
+            logger.warning(
+                "No outcome found for selection event %s", selection.get("eventId")
+            )
             continue
         built = _build_selection(selection, event, now)
         if built is not None:
@@ -498,20 +616,28 @@ async def _fetch_share(code: str) -> dict[str, Any]:
             response = await client.get(url, params=params, headers=_headers())
     except httpx.TimeoutException as exc:
         logger.warning("SportyBet request timed out for %s", code)
-        raise HTTPException(status_code=504, detail="SportyBet request timed out") from exc
+        raise HTTPException(
+            status_code=504, detail="SportyBet request timed out"
+        ) from exc
     except httpx.RequestError as exc:
         logger.warning("SportyBet request failed for %s: %s", code, exc)
-        raise HTTPException(status_code=502, detail="Unable to reach SportyBet") from exc
+        raise HTTPException(
+            status_code=502, detail="Unable to reach SportyBet"
+        ) from exc
 
     if response.status_code != 200:
         logger.warning("SportyBet returned HTTP %s for %s", response.status_code, code)
-        raise HTTPException(status_code=502, detail="Unable to fetch booking from SportyBet")
+        raise HTTPException(
+            status_code=502, detail="Unable to fetch booking from SportyBet"
+        )
 
     try:
         return response.json()
     except ValueError as exc:
         logger.warning("SportyBet returned non-JSON for %s", code)
-        raise HTTPException(status_code=502, detail="Invalid SportyBet response") from exc
+        raise HTTPException(
+            status_code=502, detail="Invalid SportyBet response"
+        ) from exc
 
 
 def _selection_identity(selection: dict[str, Any]) -> dict[str, Any]:
@@ -550,10 +676,14 @@ async def _create_share_code(selections: list[dict[str, Any]]) -> str:
             )
     except httpx.TimeoutException as exc:
         logger.warning("SportyBet rebook timed out")
-        raise HTTPException(status_code=504, detail="SportyBet request timed out") from exc
+        raise HTTPException(
+            status_code=504, detail="SportyBet request timed out"
+        ) from exc
     except httpx.RequestError as exc:
         logger.warning("SportyBet rebook request failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Unable to reach SportyBet") from exc
+        raise HTTPException(
+            status_code=502, detail="Unable to reach SportyBet"
+        ) from exc
 
     if response.status_code != 200:
         logger.warning("SportyBet rebook returned HTTP %s", response.status_code)
@@ -563,7 +693,9 @@ async def _create_share_code(selections: list[dict[str, Any]]) -> str:
         payload = response.json()
     except ValueError as exc:
         logger.warning("SportyBet rebook returned non-JSON")
-        raise HTTPException(status_code=502, detail="Invalid SportyBet response") from exc
+        raise HTTPException(
+            status_code=502, detail="Invalid SportyBet response"
+        ) from exc
 
     biz_code = payload.get("bizCode")
     share_code = (payload.get("data") or {}).get("shareCode")
@@ -583,13 +715,34 @@ async def _create_share_code(selections: list[dict[str, Any]]) -> str:
 def _draw_selection(event: SportyBetEvent) -> dict[str, Any]:
     """Build the verified 1X2 DRAW identity used by SportyBet booking."""
     if event.market_id != "1":
-        raise HTTPException(status_code=422, detail=f"Event {event.event_id} has no valid 1X2 market")
+        raise HTTPException(
+            status_code=422, detail=f"Event {event.event_id} has no valid 1X2 market"
+        )
     if event.outcome_draw_id != "2":
-        raise HTTPException(status_code=422, detail=f"Event {event.event_id} has no valid DRAW outcome")
+        raise HTTPException(
+            status_code=422, detail=f"Event {event.event_id} has no valid DRAW outcome"
+        )
     if event.product_id is None or not event.sport_id:
-        raise HTTPException(status_code=422, detail=f"Event {event.event_id} is missing booking identity")
-    if (event.match_status or "").strip().lower() in {"live", "in play", "started", "playing", "ended", "finished", "complete", "completed", "closed", "cancelled", "canceled"}:
-        raise HTTPException(status_code=422, detail=f"Event {event.event_id} is not pre-match")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Event {event.event_id} is missing booking identity",
+        )
+    if (event.match_status or "").strip().lower() in {
+        "live",
+        "in play",
+        "started",
+        "playing",
+        "ended",
+        "finished",
+        "complete",
+        "completed",
+        "closed",
+        "cancelled",
+        "canceled",
+    }:
+        raise HTTPException(
+            status_code=422, detail=f"Event {event.event_id} is not pre-match"
+        )
     selection: dict[str, Any] = {
         "eventId": event.event_id,
         "marketId": "1",
@@ -602,14 +755,29 @@ def _draw_selection(event: SportyBetEvent) -> dict[str, Any]:
     return selection
 
 
-async def create_draw_booking(fixtures: list[FixtureMatchResult]) -> DrawBookingResponse:
+async def create_draw_booking(
+    fixtures: list[FixtureMatchResult],
+) -> DrawBookingResponse:
     if not fixtures:
-        raise HTTPException(status_code=422, detail="At least one matched DRAW fixture is required")
+        raise HTTPException(
+            status_code=422, detail="At least one matched DRAW fixture is required"
+        )
     selections: list[dict[str, Any]] = []
     events: list[SportyBetEvent] = []
     for fixture in fixtures:
-        if fixture.status not in {FixtureMatchStatus.MATCHED_EXACT, FixtureMatchStatus.MATCHED_NORMALIZED, FixtureMatchStatus.MATCHED_FUZZY} or fixture.sportybet_event is None:
-            raise HTTPException(status_code=422, detail="Only successfully matched fixtures can be booked")
+        if (
+            fixture.status
+            not in {
+                FixtureMatchStatus.MATCHED_EXACT,
+                FixtureMatchStatus.MATCHED_NORMALIZED,
+                FixtureMatchStatus.MATCHED_FUZZY,
+            }
+            or fixture.sportybet_event is None
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Only successfully matched fixtures can be booked",
+            )
         event = fixture.sportybet_event
         selections.append(_draw_selection(event))
         events.append(event)
@@ -623,7 +791,9 @@ async def create_draw_booking(fixtures: list[FixtureMatchResult]) -> DrawBooking
     )
 
 
-async def rebook_without_events(booking_code: str, event_ids: list[str]) -> BookingResponse:
+async def rebook_without_events(
+    booking_code: str, event_ids: list[str]
+) -> BookingResponse:
     """Remove one OR MANY selections (by event_id) in a SINGLE rebooking.
 
     Flow (backend is the source of truth):
@@ -650,16 +820,25 @@ async def rebook_without_events(booking_code: str, event_ids: list[str]) -> Book
             targets.append(cleaned)
 
     if not targets:
-        raise HTTPException(status_code=400, detail="No selections specified for removal")
+        raise HTTPException(
+            status_code=400, detail="No selections specified for removal"
+        )
 
     # 1. Authoritative current ticket straight from SportyBet.
     payload = await _fetch_share(code)
-    if payload.get("isAvailable") is False or payload.get("bizCode") not in (None, _BIZ_CODE_OK):
-        raise HTTPException(status_code=404, detail="Booking code not found or unavailable")
+    if payload.get("isAvailable") is False or payload.get("bizCode") not in (
+        None,
+        _BIZ_CODE_OK,
+    ):
+        raise HTTPException(
+            status_code=404, detail="Booking code not found or unavailable"
+        )
 
     data = payload.get("data")
     if not isinstance(data, dict):
-        raise HTTPException(status_code=404, detail="Booking code not found or unavailable")
+        raise HTTPException(
+            status_code=404, detail="Booking code not found or unavailable"
+        )
 
     raw_selections = (data.get("ticket") or {}).get("selections") or []
 

@@ -6,10 +6,10 @@ import logging
 import time
 from datetime import date, datetime
 from typing import Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 from bs4 import BeautifulSoup
 
 from app.config.settings import get_settings
@@ -153,7 +153,7 @@ def get_draw_matches(matches: Iterable[ForebetMatch]) -> list[ForebetMatch]:
     return [match for match in matches if is_draw_prediction(match.predicted_result)]
 
 
-def rank_draw_matches(matches: Iterable[ForebetMatch], limit: int) -> list[ForebetMatch]:
+def rank_draw_matches(matches: Iterable[ForebetMatch], limit: int | None = None) -> list[ForebetMatch]:
     """Rank explicit DRAW predictions by Forebet draw probability.
 
     Matches without a published draw probability sort after scored matches and
@@ -161,7 +161,7 @@ def rank_draw_matches(matches: Iterable[ForebetMatch], limit: int) -> list[Foreb
     """
     draws = get_draw_matches(matches)
     ranked = sorted(enumerate(draws), key=lambda item: (item[1].probabilities.draw if item[1].probabilities and item[1].probabilities.draw is not None else float("-inf"), -item[0]), reverse=True)
-    return [match for _, match in ranked[:limit]]
+    return [match for _, match in ranked] if limit is None else [match for _, match in ranked[:limit]]
 
 
 def _forebet_headers(url: str, user_agent: str) -> dict[str, str]:
@@ -205,54 +205,150 @@ def _validate_browser_forebet_html(html: str, final_url: str, expected_host: str
         raise ForebetBrowserChallengeError("Forebet browser response contained no fixture table")
 
 
-async def fetch_forebet_page_browser(url: str) -> str:
-    """Acquire one Forebet page with bounded headless Chromium navigation."""
+def _fetch_forebet_page_browser_sync(url: str) -> str:
+    """Acquire one Forebet page using synchronous Playwright.
+
+    Playwright's async transport cannot spawn its Node driver correctly under
+    the Windows Proactor event loop used by this development environment.
+    Running synchronous Playwright in a worker thread avoids that limitation
+    while keeping the public acquisition API fully async.
+    """
     from urllib.parse import urlparse
+
     settings = get_settings()
     expected_host = urlparse(settings.forebet_base_url).hostname
+
     if urlparse(url).hostname != expected_host:
-        raise ForebetAcquisitionError("Browser fallback URL must belong to the configured Forebet domain")
+        raise ForebetAcquisitionError(
+            "Browser fallback URL must belong to the configured Forebet domain"
+        )
+
     timeout_ms = int(settings.forebet_browser_timeout * 1000)
-    logger.info("browser_fallback_attempted host=%s", expected_host)
+
+    logger.info(
+        "browser_fallback_attempted host=%s transport=sync_thread",
+        expected_host,
+    )
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+            ],
+        )
+
+        try:
+            context = browser.new_context(
+                user_agent=settings.forebet_user_agent,
+                locale="en-US",
+            )
+
+            page = context.new_page()
+
+            started = time.monotonic()
+
+            response = page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=timeout_ms,
+            )
+
+            try:
+                page.wait_for_selector(
+                    ".schema, body",
+                    timeout=timeout_ms,
+                )
+            except PlaywrightTimeoutError:
+                pass
+
+            html = page.content()
+            title = page.title().strip()[:120]
+
+            has_schema = page.locator(".schema").count() > 0
+            fixture_rows = page.locator(".schema > .rcnt").count()
+
+            content_type = (
+                response.headers.get("content-type")
+                if response
+                else None
+            )
+
+            final_host = urlparse(page.url).hostname
+
+            redirect_count = (
+                _redirect_count(response.request)
+                if response
+                else 0
+            )
+
+            logger.info(
+                "browser_navigation status=%s content_type=%s "
+                "title=%r final_host=%s schema=%s fixture_rows=%s "
+                "redirects=%s duration_ms=%s",
+                response.status if response else None,
+                content_type,
+                title,
+                final_host,
+                has_schema,
+                fixture_rows,
+                redirect_count,
+                int((time.monotonic() - started) * 1000),
+            )
+
+            _validate_browser_forebet_html(
+                html,
+                page.url,
+                expected_host or "",
+            )
+
+            logger.info(
+                "browser_fallback_success host=%s transport=sync_thread",
+                expected_host,
+            )
+
+            return html
+
+        finally:
+            browser.close()
+
+
+async def fetch_forebet_page_browser(url: str) -> str:
+    """Async wrapper around the Windows-safe synchronous Playwright fallback."""
+
     async with _browser_semaphore:
         try:
-            async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(headless=True, args=["--disable-dev-shm-usage", "--no-sandbox"])
-                try:
-                    context = await browser.new_context(user_agent=settings.forebet_user_agent, locale="en-US")
-                    page = await context.new_page()
-                    started = time.monotonic()
-                    response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                    try:
-                        await page.wait_for_selector(".schema, body", timeout=timeout_ms)
-                    except PlaywrightTimeoutError:
-                        pass
-                    html = await page.content()
-                    title = (await page.title()).strip()[:120]
-                    has_schema = await page.locator(".schema").count() > 0
-                    fixture_rows = await page.locator(".schema > .rcnt").count()
-                    content_type = response.headers.get("content-type") if response else None
-                    final_host = urlparse(page.url).hostname
-                    redirect_count = _redirect_count(response.request) if response else 0
-                    logger.info(
-                        "browser_navigation status=%s content_type=%s title=%r final_host=%s schema=%s fixture_rows=%s redirects=%s duration_ms=%s",
-                        response.status if response else None, content_type, title, final_host, has_schema,
-                        fixture_rows, redirect_count, int((time.monotonic() - started) * 1000),
-                    )
-                    _validate_browser_forebet_html(html, page.url, expected_host or "")
-                    logger.info("browser_fallback_success host=%s", expected_host)
-                    return html
-                finally:
-                    await browser.close()
+            return await asyncio.to_thread(
+                _fetch_forebet_page_browser_sync,
+                url,
+            )
+
         except PlaywrightTimeoutError as exc:
-            logger.warning("browser_fallback_failure reason=timeout host=%s", expected_host)
-            raise ForebetAcquisitionError("Forebet browser fallback timed out") from exc
+            logger.warning(
+                "browser_fallback_failure reason=timeout host=%s",
+                urlparse(url).hostname,
+            )
+            raise ForebetAcquisitionError(
+                "Forebet browser fallback timed out"
+            ) from exc
+
         except ForebetAcquisitionError:
-            logger.warning("browser_fallback_failure reason=validation host=%s", expected_host)
+            logger.warning(
+                "browser_fallback_failure reason=validation host=%s",
+                urlparse(url).hostname,
+            )
             raise
+
         except Exception as exc:
-            logger.warning("browser_fallback_failure reason=%s host=%s", type(exc).__name__, expected_host)
-            raise ForebetAcquisitionError(f"Forebet browser fallback failed: {type(exc).__name__}") from exc
+            logger.warning(
+                "browser_fallback_failure reason=%s host=%s",
+                type(exc).__name__,
+                urlparse(url).hostname,
+            )
+            raise ForebetAcquisitionError(
+                f"Forebet browser fallback failed: {type(exc).__name__}"
+            ) from exc
 
 
 async def fetch_forebet_page(url: str, *, client: httpx.AsyncClient | None = None) -> str:
