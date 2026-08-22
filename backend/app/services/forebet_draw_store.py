@@ -14,6 +14,7 @@ from app.services.history_store import _database_url
 metadata = MetaData()
 daily = Table("forebet_draw_daily_bookings", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False, unique=True), Column("booking_code", String(64), nullable=False), Column("status", String(16), nullable=False), Column("matches_json", Text, nullable=False), Column("source_urls_json", Text, nullable=False), Column("diagnostics_json", Text, nullable=False), Column("created_at", DateTime(timezone=True), nullable=False), Column("updated_at", DateTime(timezone=True), nullable=False))
 prebooking = Table("forebet_draw_prebooking_candidates", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False, unique=True), Column("candidates_json", Text, nullable=False), Column("diagnostics_json", Text, nullable=False), Column("updated_at", DateTime(timezone=True), nullable=False))
+compilation = Table("forebet_draw_compilation", metadata, Column("id", Integer, primary_key=True), Column("booking_code", String(64), nullable=False), Column("matches_json", Text, nullable=False), Column("prediction_dates_json", Text, nullable=False), Column("status", String(16), nullable=False), Column("created_at", DateTime(timezone=True), nullable=False), Column("updated_at", DateTime(timezone=True), nullable=False))
 revisions = Table("forebet_draw_booking_revisions", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False), Column("booking_code", String(64), nullable=False), Column("matches_json", Text, nullable=False), Column("is_current", Boolean, nullable=False), Column("created_at", DateTime(timezone=True), nullable=False), UniqueConstraint("prediction_date", "booking_code", name="uq_draw_revision_date_code"))
 
 
@@ -67,6 +68,19 @@ class ForebetDrawStore:
         with self.engine.connect() as db:
             rows = db.execute(select(prebooking).order_by(prebooking.c.prediction_date)).all()
         return [{"prediction_date": row.prediction_date, "candidates": json.loads(row.candidates_json), "diagnostics": json.loads(row.diagnostics_json), "updated_at": row.updated_at} for row in rows]
+
+    def get_compilation(self):
+        self._ensure()
+        with self.engine.connect() as db: row = db.execute(select(compilation).order_by(compilation.c.updated_at.desc())).first()
+        if not row: return None
+        return DrawWindowDay(prediction_date=date.fromisoformat(json.loads(row.prediction_dates_json)[0]), booking_code=row.booking_code, selection_count=len(json.loads(row.matches_json)), status=row.status, matches=[DrawWindowMatch.model_validate(x) for x in json.loads(row.matches_json)], source_urls=[], diagnostics=[], created_at=row.created_at, last_updated=row.updated_at)
+
+    def promote_compilation(self, booking_code: str, dates: list[date], matches: list[DrawWindowMatch]):
+        self._ensure(); now = datetime.now(timezone.utc); values = dict(booking_code=booking_code, matches_json=self._dump_matches(matches), prediction_dates_json=json.dumps([d.isoformat() for d in dates]), status="active", updated_at=now)
+        with self.engine.begin() as db:
+            row = db.execute(select(compilation.c.id)).first()
+            if row: db.execute(compilation.update().where(compilation.c.id == row.id).values(**values))
+            else: db.execute(compilation.insert().values(**values, created_at=now))
 
 
 forebet_draw_store = ForebetDrawStore()

@@ -18,7 +18,7 @@ class ForebetDrawEngine:
 
     def get_active_window(self) -> DrawWindowResponse:
         days = self.store.list_active()
-        return DrawWindowResponse(days=days, active_count=len(days))
+        return DrawWindowResponse(days=days, active_count=len(days), compilation=self.store.get_compilation())
 
     @staticmethod
     def _window_match(result: FixtureMatchResult) -> DrawWindowMatch:
@@ -58,9 +58,11 @@ class ForebetDrawEngine:
 
             current = {day.prediction_date: day for day in self.store.list_active()}
             usable_dates = sorted(day for day, items in grouped.items() if items)[:3]
+            compilation_results: dict[str, FixtureMatchResult] = {}
             for day in usable_dates:
                 deduped: dict[str, FixtureMatchResult] = {}
                 for result in grouped[day]: deduped.setdefault(result.sportybet_event.event_id, result)
+                compilation_results.update({event_id: result for event_id, result in deduped.items()})
                 matches = [self._window_match(item) for item in deduped.values()]
                 existing = current.get(day)
                 if existing and self._identity(existing.matches) == self._identity(matches): continue
@@ -72,6 +74,15 @@ class ForebetDrawEngine:
                     self.store.promote(day, booking.booking_code, matches, source_urls, diagnostics[day])
                 except Exception as exc:
                     diagnostics[day].append(f"booking unavailable: {type(exc).__name__}: {str(exc)[:200]}")
+            if len(usable_dates) >= 2 and compilation_results and get_settings().forebet_draw_booking_enabled:
+                compilation_matches = [self._window_match(result) for result in compilation_results.values()]
+                existing_compilation = self.store.get_compilation()
+                if not existing_compilation or self._identity(existing_compilation.matches) != self._identity(compilation_matches):
+                    try:
+                        compilation_booking = await create_draw_booking(list(compilation_results.values()))
+                        self.store.promote_compilation(compilation_booking.booking_code, usable_dates, compilation_matches)
+                    except Exception:
+                        pass
             self.store.complete_not_in(set(usable_dates))
             return self.get_active_window()
 

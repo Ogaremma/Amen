@@ -87,6 +87,7 @@ async def book_draws(request: DrawBookingRequest) -> DrawBookingResponse:
 async def get_draw_window() -> DrawWindowResponse:
     response = forebet_draw_engine.get_active_window()
     response.prebooking_days = forebet_draw_engine.store.list_prebooking()
+    response.compilation = forebet_draw_engine.store.get_compilation()
     return response
 
 

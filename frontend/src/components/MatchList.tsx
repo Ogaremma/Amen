@@ -48,7 +48,7 @@ export function MatchList({ matches, selectedMatchIds, onToggle, onSort }: Match
                 <div className="flex items-center gap-3">
                   <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-surface px-3 py-2 text-sm text-slate-300">
                     <Clock3 className="h-4 w-4 text-accent" />
-                    <span>{new Date(match.kickoff).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span><span className="text-yellow-300">{new Date(match.kickoff).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>{' '}<span>{new Date(match.kickoff).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span></span>
                   </div>
                   <Button
                     variant={selected ? 'default' : 'outline'}

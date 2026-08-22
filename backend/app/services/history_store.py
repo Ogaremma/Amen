@@ -126,6 +126,12 @@ class HistoryStore:
         with self.engine.connect() as db:
             return [dict(row._mapping) for row in db.execute(query)]
 
+    def delete(self, user_id: int, history_id: int) -> bool:
+        self._ensure_schema()
+        with self.engine.begin() as db:
+            result = db.execute(delete(booking_history).where(booking_history.c.id == history_id, booking_history.c.telegram_user_id == user_id))
+        return result.rowcount > 0
+
     def apply_observed_odds(self, booking: BookingResponse) -> BookingResponse:
         """Persist active odds once; replace ended odds only from that snapshot."""
         self._ensure_schema()

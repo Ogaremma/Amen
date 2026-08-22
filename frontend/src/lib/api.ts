@@ -103,6 +103,10 @@ export async function fetchHistory(): Promise<HistoryItem[]> {
   if (!response.ok) throw new Error(body?.detail || 'Unable to load history')
   return body as HistoryItem[]
 }
+export async function deleteHistoryItem(id: number): Promise<void> {
+  const response = await fetch(buildUrl(`/history/${id}`), { method: 'DELETE', headers: telegramHeaders() })
+  if (!response.ok) throw new Error('Unable to delete history item')
+}
 
 export type ForebetPredictionResult = 'HOME' | 'DRAW' | 'AWAY' | 'UNKNOWN'
 
@@ -182,6 +186,7 @@ export interface ForebetDrawWindowResponse {
   days: ForebetDrawWindowDay[]
   active_count: number
   prebooking_days?: ForebetPrebookingDay[]
+  compilation?: ForebetDrawWindowDay | null
 }
 
 export interface ForebetPrebookingCandidate {

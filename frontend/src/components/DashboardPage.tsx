@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   AlertTriangle,
@@ -16,11 +16,26 @@ import {
   X,
   History as HistoryIcon,
 } from 'lucide-react'
-import { fetchBookingByCode, fetchHistory, removeSelectedGames, type HistoryItem } from '../lib/api'
+import { deleteHistoryItem, fetchBookingByCode, fetchHistory, removeSelectedGames, type HistoryItem } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard'
 import type { BookingResponse, BookingSelection } from '../types/booking'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
+
+function SwipeHistoryCard({ item, onOpen, onDeleted, onCopy, copied, copyError }: { item: HistoryItem; onOpen: (code: string) => void; onDeleted: () => void; onCopy: (code: string) => void; copied: boolean; copyError: boolean }) {
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const [offset, setOffset] = useState(0)
+  const [deleting, setDeleting] = useState(false)
+  const end = async (x: number, y: number) => {
+    const origin = start.current; start.current = null
+    if (!origin) return
+    const dx = x - origin.x; const dy = y - origin.y
+    if (Math.abs(dx) <= Math.abs(dy) || Math.abs(dx) < 100) { setOffset(0); return }
+    setDeleting(true); setOffset(dx > 0 ? 700 : -700)
+    try { await deleteHistoryItem(item.id); window.setTimeout(onDeleted, 180) } catch { setDeleting(false); setOffset(0) }
+  }
+  return <Card className="overflow-hidden p-0" style={{ transform: `translateX(${offset}px)`, transition: deleting ? 'transform 180ms ease-out' : 'none', touchAction: 'pan-y' }} onPointerDown={(e) => { start.current = { x: e.clientX, y: e.clientY }; e.currentTarget.setPointerCapture?.(e.pointerId) }} onPointerMove={(e) => { if (start.current) { const dx = e.clientX - start.current.x; if (Math.abs(dx) > 8) setOffset(dx) } }} onPointerUp={(e) => void end(e.clientX, e.clientY)} onPointerCancel={() => { start.current = null; setOffset(0) }}><div className="flex items-center gap-3 p-4"><button type="button" className="min-w-0 flex-1 text-left" onClick={() => { if (!deleting && Math.abs(offset) < 10) onOpen(item.booking_code) }}><p className="font-semibold tracking-wide text-white">{item.booking_code}</p><p className="mt-1 text-xs text-slate-400">Loaded {new Date(item.loaded_at).toLocaleString()}</p></button><div className="flex items-center gap-2"><span role="status" aria-live="polite" className="min-w-[5.5rem] text-right text-[11px] text-emerald-300">{copied ? 'Copied to clipboard' : copyError ? 'Copy failed' : ''}</span><button type="button" aria-label={`Copy ${item.booking_code}`} onClick={(e) => { e.stopPropagation(); onCopy(item.booking_code) }} className="rounded-xl border border-white/10 p-2 text-slate-300"><Clipboard className="h-4 w-4" /></button></div></div></Card>
+}
 import { Input } from './ui/input'
 
 const MONTHS = [
@@ -341,7 +356,7 @@ export function DashboardPage() {
   ))
 
   if (!booking) {
-    if (historyOpen) return <div className="mx-auto max-w-3xl space-y-4"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setHistoryOpen(false)} aria-label="Back to booking input"><ArrowLeft className="h-4 w-4" /><span className="ml-1.5">Back</span></Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">History</h1></header>{history.length === 0 ? <Card className="p-4 text-sm text-slate-300">No booking codes yet.</Card> : history.map((item) => <Card key={item.id} className="flex items-center gap-3 p-4"><button type="button" className="min-w-0 flex-1 text-left" onClick={() => reopenHistory(item.booking_code)}><p className="font-semibold tracking-wide text-white">{item.booking_code}</p><p className="mt-1 text-xs text-slate-400">Loaded {new Date(item.loaded_at).toLocaleString()}</p></button><div className="flex shrink-0 items-center gap-2"><span role="status" aria-live="polite" className="min-w-[5.5rem] text-right text-[11px] text-emerald-300">{historyCopied === item.booking_code ? 'Copied to clipboard' : historyCopyError === item.booking_code ? 'Copy failed' : ''}</span><button type="button" aria-label={`Copy ${item.booking_code}`} disabled={historyCopying !== null} onClick={() => copyHistoryCode(item.booking_code)} className="rounded-xl border border-white/10 p-2 text-slate-300 disabled:opacity-50">{historyCopied === item.booking_code ? <Check className="h-4 w-4 text-emerald-300" /> : historyCopying === item.booking_code ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clipboard className="h-4 w-4" />}</button></div></Card>)}</div>
+    if (historyOpen) return <div className="mx-auto max-w-3xl space-y-4"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setHistoryOpen(false)} aria-label="Back to booking input"><ArrowLeft className="h-4 w-4" /><span className="ml-1.5">Back</span></Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">History</h1></header>{history.length === 0 ? <Card className="p-4 text-sm text-slate-300">No booking codes yet.</Card> : history.map((item) => <SwipeHistoryCard key={item.id} item={item} onOpen={reopenHistory} onCopy={copyHistoryCode} copied={historyCopied === item.booking_code} copyError={historyCopyError === item.booking_code} onDeleted={() => setHistory((items) => items.filter((entry) => entry.id !== item.id))} />)}</div>
     return (
       <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
         <Card className="mx-auto max-w-2xl">

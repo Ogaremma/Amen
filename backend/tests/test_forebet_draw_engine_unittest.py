@@ -33,8 +33,8 @@ class EngineTests(IsolatedAsyncioTestCase):
 
     async def test_three_days_one_code_each_and_idempotent(self):
         matches = [fm(d, str(d)) for d in (21, 22, 23, 24)]; events = [ev(d, str(d)) for d in (21, 22, 23, 24)]
-        result, create = await self.refresh(matches, events, ["A", "B", "C"])
-        self.assertEqual([x.booking_code for x in result.days], ["A", "B", "C"]); self.assertEqual(create.await_count, 3)
+        result, create = await self.refresh(matches, events, ["A", "B", "C", "COMP"])
+        self.assertEqual([x.booking_code for x in result.days], ["A", "B", "C"]); self.assertEqual(create.await_count, 4)
         result, create = await self.refresh(matches, events, [])
         self.assertEqual(create.await_count, 0); self.assertEqual(result.active_count, 3)
 
