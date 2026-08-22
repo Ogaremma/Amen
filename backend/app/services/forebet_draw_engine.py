@@ -67,8 +67,11 @@ class ForebetDrawEngine:
                 if not get_settings().forebet_draw_booking_enabled:
                     diagnostics[day].append("booking disabled by FOREBET_DRAW_BOOKING_ENABLED")
                     continue
-                booking = await create_draw_booking(list(deduped.values()))
-                self.store.promote(day, booking.booking_code, matches, source_urls, diagnostics[day])
+                try:
+                    booking = await create_draw_booking(list(deduped.values()))
+                    self.store.promote(day, booking.booking_code, matches, source_urls, diagnostics[day])
+                except Exception as exc:
+                    diagnostics[day].append(f"booking unavailable: {type(exc).__name__}: {str(exc)[:200]}")
             self.store.complete_not_in(set(usable_dates))
             return self.get_active_window()
 

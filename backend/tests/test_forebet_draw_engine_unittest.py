@@ -77,8 +77,9 @@ class EngineTests(IsolatedAsyncioTestCase):
         await self.refresh(matches, events, ["A"])
         restarted = ForebetDrawEngine(ForebetDrawStore(str(Path(self.tmp.name) / "state.sqlite3")))
         self.assertEqual(restarted.get_active_window().days[0].booking_code, "A")
-        with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=mock.Mock(forebet_draw_booking_enabled=True)), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=[fm(21, "b")]), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(1, [ev(21, "b")])), mock.patch("app.services.forebet_draw_engine.create_draw_booking", side_effect=RuntimeError("failed")):
-            with self.assertRaises(RuntimeError): await restarted.refresh_window(["url"])
+        with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=mock.Mock(forebet_draw_booking_enabled=True)), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=[fm(21, "b")]), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(1, [ev(21, "b")])), mock.patch("app.services.forebet_draw_engine.create_draw_booking", side_effect=RuntimeError("failed")) as create:
+            await restarted.refresh_window(["url"])
+        create.assert_awaited_once()
         self.assertEqual(restarted.get_active_window().days[0].booking_code, "A")
 
     async def test_booking_disabled_skips_booking_and_promotion(self):
