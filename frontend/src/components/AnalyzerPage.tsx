@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, BarChart3, Check, Copy, Loader2, RefreshCw } from 'lucide-react'
-import { getForebetDrawWindow, type ForebetDrawWindowDay } from '../lib/api'
+import { getForebetDrawWindow, type ForebetDrawWindowDay, type ForebetPrebookingDay } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
@@ -35,8 +35,13 @@ function BookingDayCard({ day }: { day: ForebetDrawWindowDay }) {
   </Card>
 }
 
+function PrebookingDayCard({ day }: { day: ForebetPrebookingDay }) {
+  return <Card className="border-amber-400/20 bg-surface p-5"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">Read-only pre-booking validation</p><h2 className="mt-1 text-xl font-semibold text-white">DRAW candidates for {formatDate(day.prediction_date)}</h2></div><div className="mt-4 space-y-2 text-sm">{day.candidates.map((candidate, index) => <div key={`${candidate.sportybet_event_id ?? 'unmatched'}-${index}`} className="rounded-lg border border-white/10 px-3 py-2"><div className="flex flex-wrap justify-between gap-2 text-white"><span>{index + 1}. {candidate.home_team} vs {candidate.away_team}</span><span>{candidate.draw_probability == null ? 'Probability unavailable' : `${candidate.draw_probability}% DRAW`}</span></div><div className="mt-1 text-slate-400">{candidate.booking_eligible ? `Eligible • ${candidate.sportybet_event_id} • ${candidate.sportybet_kickoff ?? 'kickoff unavailable'}` : `Rejected • ${candidate.status}${candidate.reason ? ` • ${candidate.reason}` : ''}`}</div></div>)}</div></Card>
+}
+
 export function AnalyzerPage() {
   const [days, setDays] = useState<ForebetDrawWindowDay[]>([])
+  const [responsePrebooking, setResponsePrebooking] = useState<ForebetPrebookingDay[]>([])
   const [state, setState] = useState<'loading' | 'success' | 'error'>('loading')
   const [error, setError] = useState('')
   const [retryToken, setRetryToken] = useState(0)
@@ -49,6 +54,7 @@ export function AnalyzerPage() {
     try {
       const response = await getForebetDrawWindow()
       setDays(response.days)
+      setResponsePrebooking(response.prebooking_days ?? [])
       setState('success')
       setError('')
     } catch (cause) {
@@ -71,6 +77,6 @@ export function AnalyzerPage() {
     <Card className="border-blue-400/20 bg-surface p-5 sm:p-7"><div className="flex items-start gap-3"><div className="rounded-xl bg-blue-400/15 p-2 text-blue-200"><BarChart3 className="h-5 w-5" /></div><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">Automatic daily bookings</p><h1 className="mt-1 text-2xl font-semibold text-white sm:text-3xl">Forebet Draw Analyzer</h1><p className="mt-2 text-sm leading-6 text-slate-300">Three rolling days of Forebet DRAW predictions, matched and booked on SportyBet.</p></div></div></Card>
     {state === 'loading' && <Card className="flex items-center gap-3 p-6 text-sm text-slate-300"><Loader2 className="h-5 w-5 animate-spin text-blue-300" />Loading active draw bookings...</Card>}
     {state === 'error' && <Card role="alert" className="flex items-center gap-3 border-red-300/20 bg-red-400/10 p-4 text-sm text-red-200"><AlertCircle className="h-4 w-4" /><span>{error}</span><Button variant="outline" size="sm" className="ml-auto" onClick={() => setRetryToken((value) => value + 1)}><RefreshCw className="h-4 w-4" />Retry</Button></Card>}
-    {state === 'success' && (days.length ? <section aria-label="Forebet draw booking window" className="space-y-4">{days.map((day) => <BookingDayCard key={day.prediction_date} day={day} />)}</section> : <Card className="p-6 text-center text-sm text-slate-400">No active Forebet draw prediction days are available yet.</Card>)}
+    {state === 'success' && <>{days.length > 0 && <section aria-label="Forebet draw booking window" className="space-y-4">{days.map((day) => <BookingDayCard key={day.prediction_date} day={day} />)}</section>}{responsePrebooking.length > 0 && <section aria-label="Forebet draw prebooking candidates" className="space-y-4">{responsePrebooking.map((day) => <PrebookingDayCard key={day.prediction_date} day={day} />)}</section>}{days.length === 0 && responsePrebooking.length === 0 && <Card className="p-6 text-center text-sm text-slate-400">No active Forebet draw prediction days are available yet.</Card>}</>}
   </div>
 }

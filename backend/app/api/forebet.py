@@ -82,7 +82,9 @@ async def book_draws(request: DrawBookingRequest) -> DrawBookingResponse:
 
 @router.get("/draw-window", response_model=DrawWindowResponse)
 async def get_draw_window() -> DrawWindowResponse:
-    return forebet_draw_engine.get_active_window()
+    response = forebet_draw_engine.get_active_window()
+    response.prebooking_days = forebet_draw_engine.store.list_prebooking()
+    return response
 
 
 @router.get("/draw-window/diagnostics")

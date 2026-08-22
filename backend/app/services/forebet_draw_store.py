@@ -13,6 +13,7 @@ from app.services.history_store import _database_url
 
 metadata = MetaData()
 daily = Table("forebet_draw_daily_bookings", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False, unique=True), Column("booking_code", String(64), nullable=False), Column("status", String(16), nullable=False), Column("matches_json", Text, nullable=False), Column("source_urls_json", Text, nullable=False), Column("diagnostics_json", Text, nullable=False), Column("created_at", DateTime(timezone=True), nullable=False), Column("updated_at", DateTime(timezone=True), nullable=False))
+prebooking = Table("forebet_draw_prebooking_candidates", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False, unique=True), Column("candidates_json", Text, nullable=False), Column("diagnostics_json", Text, nullable=False), Column("updated_at", DateTime(timezone=True), nullable=False))
 revisions = Table("forebet_draw_booking_revisions", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False), Column("booking_code", String(64), nullable=False), Column("matches_json", Text, nullable=False), Column("is_current", Boolean, nullable=False), Column("created_at", DateTime(timezone=True), nullable=False), UniqueConstraint("prediction_date", "booking_code", name="uq_draw_revision_date_code"))
 
 
@@ -50,6 +51,22 @@ class ForebetDrawStore:
         with self.engine.begin() as db:
             db.execute(daily.update().where(daily.c.status == "active", daily.c.prediction_date.not_in(active_dates)).values(status="complete", updated_at=now))
             db.execute(revisions.update().where(revisions.c.is_current.is_(True), revisions.c.prediction_date.not_in(active_dates)).values(is_current=False))
+
+    def save_prebooking(self, prediction_date: date, candidates: list[dict], diagnostics: dict):
+        self._ensure(); now = datetime.now(timezone.utc)
+        values = {"prediction_date": prediction_date, "candidates_json": json.dumps(candidates, default=str), "diagnostics_json": json.dumps(diagnostics, default=str), "updated_at": now}
+        with self.engine.begin() as db:
+            row = db.execute(select(prebooking).where(prebooking.c.prediction_date == prediction_date)).first()
+            if row:
+                db.execute(prebooking.update().where(prebooking.c.prediction_date == prediction_date).values(**values))
+            else:
+                db.execute(prebooking.insert().values(**values))
+
+    def list_prebooking(self) -> list[dict]:
+        self._ensure()
+        with self.engine.connect() as db:
+            rows = db.execute(select(prebooking).order_by(prebooking.c.prediction_date)).all()
+        return [{"prediction_date": row.prediction_date, "candidates": json.loads(row.candidates_json), "diagnostics": json.loads(row.diagnostics_json), "updated_at": row.updated_at} for row in rows]
 
 
 forebet_draw_store = ForebetDrawStore()

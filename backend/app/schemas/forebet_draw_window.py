@@ -40,4 +40,4 @@ class DrawWindowRefreshRequest(BaseModel):
 class DrawWindowResponse(BaseModel):
     days: list[DrawWindowDay]
     active_count: int
-
+    prebooking_days: list[dict] = Field(default_factory=list)

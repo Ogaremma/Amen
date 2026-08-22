@@ -181,6 +181,26 @@ export interface ForebetDrawWindowDay {
 export interface ForebetDrawWindowResponse {
   days: ForebetDrawWindowDay[]
   active_count: number
+  prebooking_days?: ForebetPrebookingDay[]
+}
+
+export interface ForebetPrebookingCandidate {
+  prediction_date: string
+  home_team: string
+  away_team: string
+  draw_probability: number | null
+  status: string
+  sportybet_event_id: string | null
+  sportybet_kickoff: string | null
+  booking_eligible: boolean
+  reason: string | null
+}
+
+export interface ForebetPrebookingDay {
+  prediction_date: string
+  candidates: ForebetPrebookingCandidate[]
+  diagnostics: Record<string, unknown>
+  updated_at: string
 }
 
 export async function getForebetDrawWindow(): Promise<ForebetDrawWindowResponse> {
