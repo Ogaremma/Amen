@@ -75,6 +75,31 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     expect(screen.getAllByRole('img', { name: 'Bet result: Pending' })).toHaveLength(2)
   })
 
+  it('renders every date section heading as bold yellow and keeps game count separate', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.fetchBookingByCode).mockResolvedValue({
+      ...original,
+      selections: original.selections.map((selection, index) => ({
+        ...selection,
+        game_status: 'upcoming',
+        result_status: 'pending',
+        local_kickoff_date: index === 2 ? '2026-08-25' : '2026-08-24',
+        kickoff_date: index === 2 ? '2026-08-25' : '2026-08-24',
+      })),
+    })
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    const headings = screen.getAllByRole('heading', { level: 2 })
+    expect(headings.map((heading) => heading.textContent)).toEqual(['AUGUST 25, 2026', 'AUGUST 24, 2026'])
+    for (const heading of headings) {
+      expect(heading).toHaveClass('date-section-heading', 'font-bold', 'text-yellow-300')
+      expect(heading).not.toHaveTextContent(/games?$/i)
+    }
+    expect(screen.getByText('2 games')).not.toHaveClass('text-yellow-300')
+    expect(screen.getByText('1 game')).not.toHaveClass('text-yellow-300')
+  })
+
   it('renders backend-provided won result on the ended card without replacing game status', async () => {
     const user = userEvent.setup()
     render(<DashboardPage />)

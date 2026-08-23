@@ -297,7 +297,7 @@ export function DashboardPage() {
     <section key={group.date} className="space-y-2.5">
       <div className="flex items-center gap-2 px-1">
         <CalendarDays className="h-4 w-4 text-accent" />
-        <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-white">{formatDateHeader(group.date)}</h2>
+        <h2 className="date-section-heading text-xs font-bold uppercase tracking-[0.18em] text-yellow-300">{formatDateHeader(group.date)}</h2>
         <span className="ml-auto text-[11px] text-slate-500">{group.selections.length} game{group.selections.length === 1 ? '' : 's'}</span>
       </div>
       <div className="space-y-2">

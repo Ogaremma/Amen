@@ -16,6 +16,7 @@ daily = Table("forebet_draw_daily_bookings", metadata, Column("id", Integer, pri
 prebooking = Table("forebet_draw_prebooking_candidates", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False, unique=True), Column("candidates_json", Text, nullable=False), Column("diagnostics_json", Text, nullable=False), Column("updated_at", DateTime(timezone=True), nullable=False))
 compilation = Table("forebet_draw_compilation", metadata, Column("id", Integer, primary_key=True), Column("booking_code", String(64), nullable=False), Column("identity", String(128), nullable=False, default=""), Column("matches_json", Text, nullable=False), Column("prediction_dates_json", Text, nullable=False), Column("diagnostics_json", Text, nullable=False, default="[]"), Column("status", String(16), nullable=False), Column("created_at", DateTime(timezone=True), nullable=False), Column("updated_at", DateTime(timezone=True), nullable=False))
 revisions = Table("forebet_draw_booking_revisions", metadata, Column("id", Integer, primary_key=True), Column("prediction_date", Date, nullable=False), Column("booking_code", String(64), nullable=False), Column("matches_json", Text, nullable=False), Column("is_current", Boolean, nullable=False), Column("created_at", DateTime(timezone=True), nullable=False), UniqueConstraint("prediction_date", "booking_code", name="uq_draw_revision_date_code"))
+raw_snapshots = Table("forebet_raw_snapshots", metadata, Column("id", Integer, primary_key=True), Column("source", String(64), nullable=False), Column("prediction_date", Date, nullable=False), Column("source_url", Text, nullable=False), Column("retrieved_at", DateTime(timezone=True), nullable=False), Column("raw_content", Text, nullable=False), Column("content_hash", String(64), nullable=False))
 
 
 class ForebetDrawStore:
@@ -76,6 +77,12 @@ class ForebetDrawStore:
                 db.execute(prebooking.update().where(prebooking.c.prediction_date == prediction_date).values(**values))
             else:
                 db.execute(prebooking.insert().values(**values))
+
+    def save_raw_snapshot(self, prediction_date: date, source_url: str, raw_content: str, *, source: str = "forebet"):
+        import hashlib
+        self._ensure()
+        with self.engine.begin() as db:
+            db.execute(raw_snapshots.insert().values(source=source, prediction_date=prediction_date, source_url=source_url, retrieved_at=datetime.now(timezone.utc), raw_content=raw_content, content_hash=hashlib.sha256(raw_content.encode()).hexdigest()))
 
     def list_prebooking(self) -> list[dict]:
         self._ensure()

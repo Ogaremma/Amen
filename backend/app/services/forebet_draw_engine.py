@@ -46,11 +46,23 @@ class ForebetDrawEngine:
 
     async def refresh_window(self, source_urls: list[str], start_datetime: datetime | None = None, end_datetime: datetime | None = None) -> DrawWindowResponse:
         async with self._lock:
-            html_pages = await asyncio.gather(*(fetch_forebet_page(url) for url in source_urls))
+            html_pages = await asyncio.gather(*(fetch_forebet_page(url) for url in source_urls), return_exceptions=True)
             forebet_matches = []
-            for url, html in zip(source_urls, html_pages): forebet_matches.extend(parse_forebet_html(html, url))
-            settings = get_settings()
             target_dates = prediction_dates_from_urls(source_urls)
+            failed_dates: set[date] = set()
+            acquisition_diagnostics: dict[date, list[str]] = defaultdict(list)
+            for url, html, day in zip(source_urls, html_pages, target_dates):
+                if isinstance(html, Exception):
+                    failed_dates.add(day)
+                    acquisition_diagnostics[day].append(f"PROVIDER_FAILURE: {type(html).__name__}: {str(html)[:200]}")
+                    continue
+                self.store.save_raw_snapshot(day, url, html)
+                try:
+                    forebet_matches.extend(parse_forebet_html(html, url))
+                except Exception as exc:
+                    failed_dates.add(day)
+                    acquisition_diagnostics[day].append(f"PARSER_FAILURE: {type(exc).__name__}: {str(exc)[:200]}")
+            settings = get_settings()
             sportybet = await get_upcoming_football_events(start_datetime=start_datetime, end_datetime=end_datetime)
             # Preserve every explicit Forebet DRAW; booking receives all validated matches.
             by_day: dict[date, list] = defaultdict(list)
@@ -63,6 +75,7 @@ class ForebetDrawEngine:
             results = match_forebet_fixtures(selected, sportybet.events)
             grouped: dict[date, list[FixtureMatchResult]] = defaultdict(list)
             diagnostics: dict[date, list[str]] = defaultdict(list)
+            for day, messages in acquisition_diagnostics.items(): diagnostics[day].extend(messages)
             for result in results:
                 kickoff = result.forebet_match.kickoff
                 if kickoff is None: continue
@@ -76,6 +89,8 @@ class ForebetDrawEngine:
             window_dates = target_dates
             compilation_results: dict[tuple, FixtureMatchResult] = {}
             for day in window_dates:
+                if day in failed_dates:
+                    continue
                 deduped: dict[tuple, FixtureMatchResult] = {}
                 for result in grouped[day]:
                     event = result.sportybet_event
