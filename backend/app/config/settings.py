@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     forebet_draw_selection_limit: int = Field(default=5, validation_alias="FOREBET_DRAW_SELECTION_LIMIT", ge=1)
     forebet_ingestion_token: str | None = Field(default=None, validation_alias="FOREBET_INGESTION_TOKEN")
     forebet_draw_booking_enabled: bool = Field(default=False, validation_alias="FOREBET_DRAW_BOOKING_ENABLED")
+    forebet_draw_paper_booking_enabled: bool = Field(default=False, validation_alias="FOREBET_DRAW_PAPER_BOOKING_ENABLED")
 
     # ---------------------------------------------------------
     # SportyBet

@@ -21,14 +21,25 @@ class DrawWindowMatch(BaseModel):
 
 class DrawWindowDay(BaseModel):
     prediction_date: date
-    booking_code: str
+    booking_code: str | None = None
     selection_count: int
-    status: Literal["active", "complete", "error"]
+    status: Literal["active", "unavailable", "complete", "error"]
     matches: list[DrawWindowMatch]
     source_urls: list[str] = Field(default_factory=list)
     diagnostics: list[str] = Field(default_factory=list)
     created_at: datetime
     last_updated: datetime
+
+class DrawCompilation(BaseModel):
+    compilation_id: str
+    booking_code: str | None = None
+    selection_count: int
+    prediction_dates: list[date]
+    matches: list[DrawWindowMatch]
+    status: Literal["active", "empty", "error"]
+    identity: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class DrawWindowRefreshRequest(BaseModel):
@@ -41,4 +52,4 @@ class DrawWindowResponse(BaseModel):
     days: list[DrawWindowDay]
     active_count: int
     prebooking_days: list[dict] = Field(default_factory=list)
-    compilation: DrawWindowDay | None = None
+    compilation: DrawCompilation | None = None

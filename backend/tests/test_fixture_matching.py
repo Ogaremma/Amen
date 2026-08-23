@@ -1,6 +1,6 @@
 from datetime import datetime, timezone, timedelta
 
-from app.schemas.forebet import ForebetMatch, ForebetPredictionResult, SportyBetEvent, FixtureMatchStatus
+from app.schemas.forebet import ForebetMatch, ForebetPredictionResult, ForebetProbability, SportyBetEvent, FixtureMatchStatus
 from app.services.fixture_matching import draw_matches_by_date, match_forebet_fixtures, normalize_team_name
 
 
@@ -67,6 +67,26 @@ def test_date_only_forebet_uses_lagos_sportybet_calendar_date():
 
 def test_no_candidate_is_unmatched():
     assert match_forebet_fixtures([fm()], [])[0].status == FixtureMatchStatus.UNMATCHED
+
+def test_common_provider_name_variants():
+    cases = [
+        ('Universidad Católica', 'CD Universidad Catolica'),
+        ('Forward Madison', 'Forward Madison FC'),
+        ('Manchester United', 'Man Utd'),
+        ('St. Patrick’s Athletic', 'Saint Patricks Athletic FC'),
+    ]
+    for source, provider in cases:
+        result = match_forebet_fixtures([fm(home_team=source)], [ev(home_team=provider)])[0]
+        assert result.status in {FixtureMatchStatus.MATCHED_NORMALIZED, FixtureMatchStatus.MATCHED_FUZZY}
+
+def test_low_draw_probability_never_blocks_matching():
+    for probability in (18, 10, 5):
+        result = match_forebet_fixtures([fm(probabilities=ForebetProbability(draw=probability))], [ev()])[0]
+        assert result.sportybet_event is not None
+
+def test_unrelated_same_date_clubs_are_rejected():
+    result = match_forebet_fixtures([fm(home_team='Manchester United', away_team='Chelsea')], [ev(home_team='Manchester City', away_team='Cheltenham')])[0]
+    assert result.status == FixtureMatchStatus.UNMATCHED
 
 
 def test_ambiguous_candidates_are_not_guessed():

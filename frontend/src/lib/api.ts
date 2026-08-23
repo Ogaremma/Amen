@@ -172,21 +172,32 @@ export interface ForebetDrawWindowMatch {
 
 export interface ForebetDrawWindowDay {
   prediction_date: string
-  booking_code: string
+  booking_code: string | null
   selection_count: number
-  status: 'active' | 'complete' | 'error'
+  status: 'active' | 'unavailable' | 'complete' | 'error'
   matches: ForebetDrawWindowMatch[]
   source_urls: string[]
   diagnostics: string[]
   created_at: string
   last_updated: string
 }
+export interface ForebetDrawCompilation {
+  compilation_id: string
+  identity: string
+  booking_code: string | null
+  selection_count: number
+  prediction_dates: string[]
+  matches: ForebetDrawWindowMatch[]
+  status: 'active' | 'empty' | 'error'
+  created_at: string
+  updated_at: string
+}
 
 export interface ForebetDrawWindowResponse {
   days: ForebetDrawWindowDay[]
   active_count: number
   prebooking_days?: ForebetPrebookingDay[]
-  compilation?: ForebetDrawWindowDay | null
+  compilation?: ForebetDrawCompilation | null
 }
 
 export interface ForebetPrebookingCandidate {

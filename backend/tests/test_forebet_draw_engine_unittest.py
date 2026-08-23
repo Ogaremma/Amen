@@ -31,6 +31,60 @@ class EngineTests(IsolatedAsyncioTestCase):
             result = await self.engine.refresh_window(["https://forebet.test"])
         return result, create
 
+    async def paper_refresh(self, matches, events):
+        settings = mock.Mock(forebet_draw_booking_enabled=False, forebet_draw_paper_booking_enabled=True)
+        with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=settings), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=matches), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(len(events), events)), mock.patch("app.services.forebet_draw_engine.create_draw_booking", side_effect=AssertionError("real booking forbidden")):
+            return await self.engine.refresh_window(["https://forebet.test"])
+
+    async def test_paper_three_day_window_compilation_and_idempotency(self):
+        matches = [fm(day, f"{day}-{i}") for day, count in ((21, 3), (22, 4), (23, 5)) for i in range(count)]
+        events = [ev(day, f"{day}-{i}") for day, count in ((21, 3), (22, 4), (23, 5)) for i in range(count)]
+        first = await self.paper_refresh(matches, events)
+        self.assertEqual(len(first.days), 3); self.assertEqual([d.selection_count for d in first.days], [3, 4, 5])
+        self.assertEqual(first.compilation.selection_count, 12)
+        codes = [d.booking_code for d in first.days]; compilation_code = first.compilation.booking_code
+        second = await self.paper_refresh(matches, events)
+        self.assertEqual([d.booking_code for d in second.days], codes); self.assertEqual(second.compilation.booking_code, compilation_code)
+
+    async def test_paper_changed_and_played_selections_replace_codes(self):
+        matches = [fm(21, x) for x in "abc"]
+        first = await self.paper_refresh(matches, [ev(21, x) for x in "abc"])
+        second = await self.paper_refresh(matches, [ev(21, "a").model_copy(update={"match_status": "Live"}), ev(21, "b"), ev(21, "c")])
+        self.assertEqual([m.event_id for m in first.days[0].matches], list("abc"))
+        self.assertEqual([m.event_id for m in second.days[0].matches], list("bc"))
+        self.assertNotEqual(first.days[0].booking_code, second.days[0].booking_code)
+
+    async def test_paper_empty_day_is_preserved_without_code(self):
+        matches = [fm(day, str(day)) for day in (21, 22, 23)]
+        result = await self.paper_refresh(matches, [ev(21, "21"), ev(23, "23")])
+        self.assertEqual(len(result.days), 3)
+        empty = next(day for day in result.days if day.prediction_date.day == 22)
+        self.assertEqual(empty.status, "unavailable"); self.assertIsNone(empty.booking_code); self.assertEqual(empty.selection_count, 0)
+
+    async def test_compilation_deduplicates_selection_identity(self):
+        matches = [fm(21, "shared"), fm(22, "shared"), fm(23, "unique")]
+        events = [ev(21, "shared"), ev(22, "shared"), ev(23, "unique")]
+        result = await self.paper_refresh(matches, events)
+        self.assertEqual(result.compilation.selection_count, 2)
+        self.assertEqual(len(result.compilation.prediction_dates), 3)
+
+    async def test_paper_failure_isolated_and_retryable(self):
+        matches = [fm(day, str(day)) for day in (21, 22, 23)]
+        events = [ev(day, str(day)) for day in (21, 22, 23)]
+        original = self.engine._paper_code
+        failed = False
+        def paper_code(items):
+            nonlocal failed
+            if not failed and items[0].event_id == "21":
+                failed = True
+                raise RuntimeError("paper adapter unavailable")
+            return original(items)
+        with mock.patch.object(self.engine, "_paper_code", side_effect=paper_code):
+            first = await self.paper_refresh(matches, events)
+        self.assertEqual([day.prediction_date.day for day in first.days], [22, 23])
+        second = await self.paper_refresh(matches, events)
+        self.assertEqual([day.prediction_date.day for day in second.days], [21, 22, 23])
+
     async def test_three_days_one_code_each_and_idempotent(self):
         matches = [fm(d, str(d)) for d in (21, 22, 23, 24)]; events = [ev(d, str(d)) for d in (21, 22, 23, 24)]
         result, create = await self.refresh(matches, events, ["A", "B", "C", "COMP"])

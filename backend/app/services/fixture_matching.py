@@ -16,7 +16,7 @@ from app.schemas.forebet import (
     SportyBetEvent,
 )
 
-KICKOFF_TOLERANCE_SECONDS = 15 * 60
+KICKOFF_TOLERANCE_SECONDS = 60 * 60
 try:
     _LAGOS = ZoneInfo("Africa/Lagos")
 except ZoneInfoNotFoundError:
@@ -33,6 +33,10 @@ def normalize_team_name(name: str) -> str:
     value = re.sub(r"[\u2010-\u2015\-]", " ", value)
     value = re.sub(r"[&/.,'’()\[\]{}]", " ", value)
     value = re.sub(r"\b(?:fc|cf|sc|afc|cd|ca|de|panama)\b", "", value)
+    value = re.sub(r"\b(?:f\.?c\.?|c\.?f\.?|s\.?c\.?)\b", "", value)
+    value = re.sub(r"\b(?:utd|united)\b", "united", value)
+    value = re.sub(r"\bmanchester\b", "man", value)
+    value = re.sub(r"\bsaint\b", "st", value)
     value = re.sub(r"\bplaza\s+amador\s+city\b", "plaza amador", value)
     return " ".join(value.split())
 
@@ -196,169 +200,39 @@ def match_forebet_fixtures(
         if forebet.predicted_result != ForebetPredictionResult.DRAW:
             continue
         if forebet.kickoff is None:
-            results.append(
-                FixtureMatchResult(
-                    forebet_match=forebet,
-                    status=FixtureMatchStatus.UNMATCHED,
-                    reason="Forebet kickoff is missing",
-                )
-            )
-            continue
-        forebet_has_precise_time = isinstance(forebet.kickoff, datetime)
-        f_time = _aware_datetime(forebet.kickoff)
-        home, away = (
-            normalize_team_name(forebet.home_team),
-            normalize_team_name(forebet.away_team),
-        )
-        candidates: list[tuple[SportyBetEvent, bool, float]] = []
-        fallback_used = False
+            results.append(FixtureMatchResult(forebet_match=forebet, status=FixtureMatchStatus.UNMATCHED, reason="Forebet kickoff is missing")); continue
+        ftime = _aware_datetime(forebet.kickoff)
+        fday = ftime.astimezone(_LAGOS).date()
+        scored: list[tuple[SportyBetEvent, float, dict]] = []
         for event in events:
-            e_time = _aware_datetime(event.kickoff)
-            delta = abs(
-                (
-                    f_time.astimezone(timezone.utc) - e_time.astimezone(timezone.utc)
-                ).total_seconds()
-            )
-            same_prediction_date = (
-                forebet.kickoff == e_time.astimezone(_LAGOS).date()
-                if not forebet_has_precise_time
-                else True
-            )
-            if (
-                (forebet_has_precise_time and delta > tolerance_seconds)
-                or not same_prediction_date
-                or normalize_team_name(event.home_team) != home
-                or normalize_team_name(event.away_team) != away
-            ):
+            if event.sport_id and event.sport_id != "sr:sport:1":
                 continue
-            exact = (
-                forebet_has_precise_time
-                and forebet.home_team == event.home_team
-                and forebet.away_team == event.away_team
-                and delta == 0
-                and normalize_competition(forebet.competition)
-                == normalize_competition(event.competition)
-            )
-            confidence = (
-                1.0
-                if exact
-                else (
-                    0.9
-                    if not forebet_has_precise_time
-                    else max(0.8, 0.9 - delta / max(tolerance_seconds, 1) * 0.1)
-                )
-            )
-            candidates.append((event, exact, confidence))
-        compatible = [
-            candidate
-            for candidate in candidates
-            if _competition_compatible(forebet.competition, candidate[0].competition)
-        ]
-        if compatible:
-            candidates = compatible
-        if not candidates and not forebet_has_precise_time:
-            fallback: list[tuple[SportyBetEvent, bool, float]] = []
-            for event in events:
-                e_time = _aware_datetime(event.kickoff)
-                same_date = (
-                    forebet.kickoff == e_time.astimezone(_LAGOS).date()
-                    if not forebet_has_precise_time
-                    else f_time.astimezone(_LAGOS).date()
-                    == e_time.astimezone(_LAGOS).date()
-                )
-                if not same_date:
-                    continue
-                home_score = _team_similarity(forebet.home_team, event.home_team)
-                away_score = _team_similarity(forebet.away_team, event.away_team)
-                if home_score < 0.86 or away_score < 0.86:
-                    continue
-                delta = abs(
-                    (
-                        f_time.astimezone(timezone.utc)
-                        - e_time.astimezone(timezone.utc)
-                    ).total_seconds()
-                )
-                context = _competition_compatible(
-                    forebet.competition, event.competition
-                ) or (forebet_has_precise_time and delta <= 6 * 3600)
-                if not context:
-                    continue
-                fallback.append((event, False, min(home_score, away_score)))
-            candidates = fallback
-            fallback_used = bool(candidates)
-        if not candidates and not forebet_has_precise_time:
-            advanced = []
-            for event in events:
-                item = _advanced_candidate(forebet, event)
-                if item:
-                    advanced.append((event, item[0], item[1]))
-            advanced.sort(key=lambda item: item[1], reverse=True)
-            if advanced:
-                best = advanced[0]
-                second = advanced[1][1] if len(advanced) > 1 else 0.0
-                margin = best[1] - second
-                if (
-                    best[1] >= 0.70
-                    and margin >= 0.08
-                    and best[2]["minimum_team_similarity"] >= 0.72
-                    and best[2]["competition_similarity"] >= 0.25
-                ):
-                    event, confidence, evidence = best
-                    results.append(
-                        FixtureMatchResult(
-                            forebet_match=forebet,
-                            status=FixtureMatchStatus.MATCHED_NORMALIZED,
-                            matching_method="advanced_evidence",
-                            matching_confidence=confidence,
-                            sportybet_event=event,
-                            candidate_margin=margin,
-                            **evidence,
-                        )
-                    )
-                    continue
-                if len(advanced) > 1 and best[1] >= 0.70 and margin < 0.08:
-                    results.append(
-                        FixtureMatchResult(
-                            forebet_match=forebet,
-                            status=FixtureMatchStatus.AMBIGUOUS,
-                            candidates=[item[0] for item in advanced[:5]],
-                            reason="Advanced evidence candidates are too close",
-                            candidate_margin=margin,
-                            **best[2],
-                        )
-                    )
-                    continue
-        if len(candidates) == 1:
-            event, exact, confidence = candidates[0]
-            method = (
-                "exact" if exact else ("evidence" if fallback_used else "normalized")
-            )
-            results.append(
-                FixtureMatchResult(
-                    forebet_match=forebet,
-                    status=FixtureMatchStatus.MATCHED_EXACT
-                    if exact
-                    else FixtureMatchStatus.MATCHED_NORMALIZED,
-                    matching_method=method,
-                    matching_confidence=confidence,
-                    sportybet_event=event,
-                )
-            )
-        elif len(candidates) > 1:
-            results.append(
-                FixtureMatchResult(
-                    forebet_match=forebet,
-                    status=FixtureMatchStatus.AMBIGUOUS,
-                    candidates=[candidate[0] for candidate in candidates],
-                    reason="Multiple SportyBet fixtures satisfy the identity constraints",
-                )
-            )
-        else:
-            results.append(
-                FixtureMatchResult(
-                    forebet_match=forebet,
-                    status=FixtureMatchStatus.UNMATCHED,
-                    reason="No SportyBet fixture matched home/away/date/time/competition constraints",
-                )
-            )
+            if (event.match_status or "").lower() in {"live", "started", "playing", "ended", "finished", "complete", "completed", "closed", "cancelled", "canceled"}:
+                continue
+            etime = _aware_datetime(event.kickoff)
+            if etime.astimezone(_LAGOS).date() != fday:
+                continue
+            hs, aws = _advanced_team_similarity(forebet.home_team, event.home_team), _advanced_team_similarity(forebet.away_team, event.away_team)
+            if hs < 0.68 or aws < 0.68:
+                continue
+            delta = abs((ftime.astimezone(timezone.utc) - etime.astimezone(timezone.utc)).total_seconds()) / 60
+            if isinstance(forebet.kickoff, datetime) and delta > max(tolerance_seconds, 60 * 60) / 60:
+                continue
+            comp = _competition_similarity(forebet.competition, event.competition)
+            score = min(hs, aws) * 0.55 + ((hs + aws) / 2) * 0.25 + comp * 0.10 + max(0, 1 - min(delta, 180) / 180) * 0.10
+            scored.append((event, score, {"home_similarity": hs, "away_similarity": aws, "minimum_team_similarity": min(hs, aws), "average_team_similarity": (hs + aws) / 2, "competition_similarity": comp, "kickoff_delta_hours": delta / 60, "same_lagos_date": True, "same_direction": True}))
+        scored.sort(key=lambda item: item[1], reverse=True)
+        if not scored:
+            results.append(FixtureMatchResult(forebet_match=forebet, status=FixtureMatchStatus.UNMATCHED, reason="No same-date directional SportyBet candidate")); continue
+        best = scored[0]; second = scored[1][1] if len(scored) > 1 else 0
+        margin = best[1] - second
+        if best[1] < 0.68 or (len(scored) > 1 and margin < 0.06):
+            results.append(FixtureMatchResult(forebet_match=forebet, status=FixtureMatchStatus.AMBIGUOUS if len(scored) > 1 else FixtureMatchStatus.UNMATCHED, candidates=[x[0] for x in scored[:5]], reason="Candidates lack sufficient evidence or separation", candidate_margin=margin, **best[2])); continue
+        event, score, evidence = best
+        exact = normalize_team_name(forebet.home_team) == normalize_team_name(event.home_team) and normalize_team_name(forebet.away_team) == normalize_team_name(event.away_team)
+        raw_exact = forebet.home_team.casefold() == event.home_team.casefold() and forebet.away_team.casefold() == event.away_team.casefold() and evidence["kickoff_delta_hours"] == 0
+        alias_used = normalize_team_name(forebet.home_team) in _ADVANCED_TEAM_ALIASES or normalize_team_name(forebet.away_team) in _ADVANCED_TEAM_ALIASES
+        method = "exact" if raw_exact else ("normalized" if exact else ("advanced_evidence" if alias_used else "evidence"))
+        status = FixtureMatchStatus.MATCHED_EXACT if raw_exact else (FixtureMatchStatus.MATCHED_NORMALIZED if score >= 0.82 else FixtureMatchStatus.MATCHED_FUZZY)
+        results.append(FixtureMatchResult(forebet_match=forebet, status=status, matching_method=method, matching_confidence=score, sportybet_event=event, candidate_margin=margin, **evidence))
     return results

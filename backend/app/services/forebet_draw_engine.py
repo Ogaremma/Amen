@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections import defaultdict
 from datetime import date, datetime
 
@@ -30,11 +31,24 @@ class ForebetDrawEngine:
     def _identity(matches: list[DrawWindowMatch]):
         return sorted((m.event_id, m.market_id, m.outcome_id, m.product_id, m.sport_id, m.specifier or "") for m in matches)
 
+    @classmethod
+    def _identity_hash(cls, matches: list[DrawWindowMatch]) -> str:
+        return hashlib.sha256(repr(cls._identity(matches)).encode()).hexdigest()
+
+    @classmethod
+    def _paper_code(cls, matches: list[DrawWindowMatch]) -> str:
+        return f"PAPER-{cls._identity_hash(matches)[:10].upper()}"
+
+    @staticmethod
+    def _paper_enabled(settings) -> bool:
+        return getattr(settings, "forebet_draw_paper_booking_enabled", False) is True
+
     async def refresh_window(self, source_urls: list[str], start_datetime: datetime | None = None, end_datetime: datetime | None = None) -> DrawWindowResponse:
         async with self._lock:
             html_pages = await asyncio.gather(*(fetch_forebet_page(url) for url in source_urls))
             forebet_matches = []
             for url, html in zip(source_urls, html_pages): forebet_matches.extend(parse_forebet_html(html, url))
+            settings = get_settings()
             sportybet = await get_upcoming_football_events(start_datetime=start_datetime, end_datetime=end_datetime)
             # Preserve every explicit Forebet DRAW; booking receives all validated matches.
             by_day: dict[date, list] = defaultdict(list)
@@ -57,33 +71,53 @@ class ForebetDrawEngine:
                     diagnostics[day].append(f"{result.forebet_match.home_team} vs {result.forebet_match.away_team}: {result.status.value} - {result.reason or 'invalid DRAW booking identity'}")
 
             current = {day.prediction_date: day for day in self.store.list_active()}
-            usable_dates = sorted(day for day, items in grouped.items() if items)[:3]
-            compilation_results: dict[str, FixtureMatchResult] = {}
-            for day in usable_dates:
-                deduped: dict[str, FixtureMatchResult] = {}
-                for result in grouped[day]: deduped.setdefault(result.sportybet_event.event_id, result)
-                compilation_results.update({event_id: result for event_id, result in deduped.items()})
+            window_dates = sorted({(m.kickoff.date() if isinstance(m.kickoff, datetime) else m.kickoff) for m in forebet_matches if m.kickoff is not None})[:3]
+            compilation_results: dict[tuple, FixtureMatchResult] = {}
+            for day in window_dates:
+                deduped: dict[tuple, FixtureMatchResult] = {}
+                for result in grouped[day]:
+                    event = result.sportybet_event
+                    key = (event.event_id, event.market_id, event.outcome_draw_id, event.product_id, event.sport_id, event.specifier or "")
+                    deduped.setdefault(key, result)
+                compilation_results.update(deduped)
                 matches = [self._window_match(item) for item in deduped.values()]
                 existing = current.get(day)
                 if existing and self._identity(existing.matches) == self._identity(matches): continue
-                if not get_settings().forebet_draw_booking_enabled:
-                    diagnostics[day].append("booking disabled by FOREBET_DRAW_BOOKING_ENABLED")
+                if not matches:
+                    if settings.forebet_draw_booking_enabled or self._paper_enabled(settings):
+                        self.store.promote(day, None, [], source_urls, diagnostics[day], status="unavailable")
                     continue
                 try:
-                    booking = await create_draw_booking(list(deduped.values()))
-                    self.store.promote(day, booking.booking_code, matches, source_urls, diagnostics[day])
+                    if settings.forebet_draw_booking_enabled:
+                        booking_code = (await create_draw_booking(list(deduped.values()))).booking_code
+                    elif self._paper_enabled(settings):
+                        booking_code = self._paper_code(matches)
+                        diagnostics[day].append("paper booking used; real booking disabled")
+                    else:
+                        diagnostics[day].append("booking disabled by FOREBET_DRAW_BOOKING_ENABLED")
+                        continue
+                    self.store.promote(day, booking_code, matches, source_urls, diagnostics[day])
                 except Exception as exc:
                     diagnostics[day].append(f"booking unavailable: {type(exc).__name__}: {str(exc)[:200]}")
-            if len(usable_dates) >= 2 and compilation_results and get_settings().forebet_draw_booking_enabled:
+            if len(window_dates) >= 2 and compilation_results:
                 compilation_matches = [self._window_match(result) for result in compilation_results.values()]
                 existing_compilation = self.store.get_compilation()
-                if not existing_compilation or self._identity(existing_compilation.matches) != self._identity(compilation_matches):
+                identity = self._identity_hash(compilation_matches)
+                if not existing_compilation or existing_compilation.identity != identity:
                     try:
-                        compilation_booking = await create_draw_booking(list(compilation_results.values()))
-                        self.store.promote_compilation(compilation_booking.booking_code, usable_dates, compilation_matches)
+                        if settings.forebet_draw_booking_enabled:
+                            booking_code = (await create_draw_booking(list(compilation_results.values()))).booking_code
+                        elif self._paper_enabled(settings):
+                            booking_code = self._paper_code(compilation_matches)
+                        else:
+                            booking_code = None
+                        if booking_code:
+                            self.store.promote_compilation(booking_code, window_dates, compilation_matches, identity)
                     except Exception:
                         pass
-            self.store.complete_not_in(set(usable_dates))
+            elif settings.forebet_draw_booking_enabled or self._paper_enabled(settings):
+                self.store.empty_compilation(window_dates)
+            self.store.complete_not_in(set(window_dates))
             return self.get_active_window()
 
     async def refresh_day(self, prediction_date: date, source_urls: list[str], start_datetime: datetime | None = None, end_datetime: datetime | None = None) -> DrawWindowResponse:
