@@ -10,6 +10,7 @@ from app.schemas.forebet_draw_window import DrawWindowDay, DrawWindowMatch, Draw
 from app.config.settings import get_settings
 from app.services.fixture_matching import match_forebet_fixtures
 from app.services.forebet import fetch_forebet_page, parse_forebet_html
+from app.services.forebet_dates import prediction_dates_from_urls
 from app.services.forebet_draw_store import ForebetDrawStore, forebet_draw_store
 from app.services.sportybet import create_draw_booking, get_upcoming_football_events
 
@@ -49,6 +50,7 @@ class ForebetDrawEngine:
             forebet_matches = []
             for url, html in zip(source_urls, html_pages): forebet_matches.extend(parse_forebet_html(html, url))
             settings = get_settings()
+            target_dates = prediction_dates_from_urls(source_urls)
             sportybet = await get_upcoming_football_events(start_datetime=start_datetime, end_datetime=end_datetime)
             # Preserve every explicit Forebet DRAW; booking receives all validated matches.
             by_day: dict[date, list] = defaultdict(list)
@@ -57,7 +59,7 @@ class ForebetDrawEngine:
                     continue
                 day = match.kickoff.date() if isinstance(match.kickoff, datetime) else match.kickoff
                 by_day[day].append(match)
-            selected = [match for day in sorted(by_day) for match in by_day[day]]
+            selected = [match for day in target_dates for match in by_day.get(day, [])]
             results = match_forebet_fixtures(selected, sportybet.events)
             grouped: dict[date, list[FixtureMatchResult]] = defaultdict(list)
             diagnostics: dict[date, list[str]] = defaultdict(list)
@@ -71,7 +73,7 @@ class ForebetDrawEngine:
                     diagnostics[day].append(f"{result.forebet_match.home_team} vs {result.forebet_match.away_team}: {result.status.value} - {result.reason or 'invalid DRAW booking identity'}")
 
             current = {day.prediction_date: day for day in self.store.list_active()}
-            window_dates = sorted({(m.kickoff.date() if isinstance(m.kickoff, datetime) else m.kickoff) for m in forebet_matches if m.kickoff is not None})[:3]
+            window_dates = target_dates
             compilation_results: dict[tuple, FixtureMatchResult] = {}
             for day in window_dates:
                 deduped: dict[tuple, FixtureMatchResult] = {}
@@ -99,7 +101,10 @@ class ForebetDrawEngine:
                     self.store.promote(day, booking_code, matches, source_urls, diagnostics[day])
                 except Exception as exc:
                     diagnostics[day].append(f"booking unavailable: {type(exc).__name__}: {str(exc)[:200]}")
-            if len(window_dates) >= 2 and compilation_results:
+                    self.store.promote(day, None, matches, source_urls, diagnostics[day], status="error")
+            if compilation_results and len(compilation_results) > 50:
+                self.store.unavailable_compilation(window_dates, status="overflow", diagnostics=["SportyBet supports at most 50 selections per compilation"])
+            elif compilation_results:
                 compilation_matches = [self._window_match(result) for result in compilation_results.values()]
                 existing_compilation = self.store.get_compilation()
                 identity = self._identity_hash(compilation_matches)
@@ -113,10 +118,10 @@ class ForebetDrawEngine:
                             booking_code = None
                         if booking_code:
                             self.store.promote_compilation(booking_code, window_dates, compilation_matches, identity)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self.store.unavailable_compilation(window_dates, status="error", diagnostics=[f"booking unavailable: {type(exc).__name__}: {str(exc)[:200]}"], matches=compilation_matches, identity=identity)
             elif settings.forebet_draw_booking_enabled or self._paper_enabled(settings):
-                self.store.empty_compilation(window_dates)
+                self.store.unavailable_compilation(window_dates)
             self.store.complete_not_in(set(window_dates))
             return self.get_active_window()
 

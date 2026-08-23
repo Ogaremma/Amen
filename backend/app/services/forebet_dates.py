@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urljoin
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config.settings import get_settings
@@ -30,3 +31,15 @@ def future_prediction_dates(*, now: datetime | None = None, count: int = 3) -> l
 
 def future_prediction_urls(*, now: datetime | None = None, count: int = 3, base_url: str | None = None) -> list[str]:
     return [forebet_prediction_url(day, base_url=base_url) for day in future_prediction_dates(now=now, count=count)]
+
+
+def prediction_dates_from_urls(urls: list[str]) -> list[date]:
+    dates: list[date] = []
+    for url in urls:
+        match = re.search(r"/(\d{4}-\d{2}-\d{2})(?:[/?#]|$)", url)
+        if not match:
+            raise ValueError(f"Forebet source URL has no prediction date: {url}")
+        dates.append(date.fromisoformat(match.group(1)))
+    if len(dates) != 3 or len(set(dates)) != 3:
+        raise ValueError("Forebet draw window requires exactly three unique target dates")
+    return dates

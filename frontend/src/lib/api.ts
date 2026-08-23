@@ -188,7 +188,8 @@ export interface ForebetDrawCompilation {
   selection_count: number
   prediction_dates: string[]
   matches: ForebetDrawWindowMatch[]
-  status: 'active' | 'empty' | 'error'
+  status: 'active' | 'unavailable' | 'overflow' | 'error'
+  diagnostics: string[]
   created_at: string
   updated_at: string
 }

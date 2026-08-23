@@ -16,6 +16,8 @@ def fm(day, event_id):
 def ev(day, event_id):
     return SportyBetEvent(event_id=event_id, home_team=f"Home {event_id}", away_team=f"Away {event_id}", home_team_name=f"Home {event_id}", away_team_name=f"Away {event_id}", competition="League", kickoff=datetime(2026, 8, day, 15, tzinfo=timezone.utc), sport_id="sr:sport:1", market_id="1", outcome_draw_id="2", product_id=3, match_status="Not start")
 
+TARGET_URLS = [f"https://forebet.test/{date(2026, 8, day).isoformat()}" for day in (21, 22, 23)]
+
 
 class EngineTests(IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -23,18 +25,18 @@ class EngineTests(IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self): self.tmp.cleanup()
 
-    async def refresh(self, matches, events, codes):
+    async def refresh(self, matches, events, codes, urls=TARGET_URLS):
         async def booking(fixtures):
             code = codes.pop(0)
             return mock.Mock(booking_code=code)
         with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=mock.Mock(forebet_draw_booking_enabled=True)), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=matches), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(len(events), events)), mock.patch("app.services.forebet_draw_engine.create_draw_booking", side_effect=booking) as create:
-            result = await self.engine.refresh_window(["https://forebet.test"])
+            result = await self.engine.refresh_window(urls)
         return result, create
 
     async def paper_refresh(self, matches, events):
         settings = mock.Mock(forebet_draw_booking_enabled=False, forebet_draw_paper_booking_enabled=True)
         with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=settings), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=matches), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(len(events), events)), mock.patch("app.services.forebet_draw_engine.create_draw_booking", side_effect=AssertionError("real booking forbidden")):
-            return await self.engine.refresh_window(["https://forebet.test"])
+            return await self.engine.refresh_window(TARGET_URLS)
 
     async def test_paper_three_day_window_compilation_and_idempotency(self):
         matches = [fm(day, f"{day}-{i}") for day, count in ((21, 3), (22, 4), (23, 5)) for i in range(count)]
@@ -61,6 +63,14 @@ class EngineTests(IsolatedAsyncioTestCase):
         empty = next(day for day in result.days if day.prediction_date.day == 22)
         self.assertEqual(empty.status, "unavailable"); self.assertIsNone(empty.booking_code); self.assertEqual(empty.selection_count, 0)
 
+    async def test_authoritative_urls_ignore_stray_previous_date(self):
+        matches = [fm(20, "stray"), fm(21, "a"), fm(22, "b"), fm(23, "c"), fm(24, "next")]
+        events = [ev(20, "stray"), ev(21, "a"), ev(22, "b"), ev(23, "c"), ev(24, "next")]
+        result = await self.paper_refresh(matches, events)
+        self.assertEqual([day.prediction_date.day for day in result.days], [21, 22, 23])
+        self.assertNotIn("stray", [match.event_id for day in result.days for match in day.matches])
+        self.assertNotIn("next", [match.event_id for day in result.days for match in day.matches])
+
     async def test_compilation_deduplicates_selection_identity(self):
         matches = [fm(21, "shared"), fm(22, "shared"), fm(23, "unique")]
         events = [ev(21, "shared"), ev(22, "shared"), ev(23, "unique")]
@@ -81,9 +91,23 @@ class EngineTests(IsolatedAsyncioTestCase):
             return original(items)
         with mock.patch.object(self.engine, "_paper_code", side_effect=paper_code):
             first = await self.paper_refresh(matches, events)
-        self.assertEqual([day.prediction_date.day for day in first.days], [22, 23])
+        self.assertEqual([day.prediction_date.day for day in first.days], [21, 22, 23])
+        self.assertEqual(first.days[0].status, "error"); self.assertIsNone(first.days[0].booking_code)
         second = await self.paper_refresh(matches, events)
         self.assertEqual([day.prediction_date.day for day in second.days], [21, 22, 23])
+
+    async def test_compilation_overflow_does_not_truncate_daily_bookings(self):
+        matches = [fm(day, f"{day}-{i}") for day in (21, 22, 23) for i in range(17)]
+        events = [ev(day, f"{day}-{i}") for day in (21, 22, 23) for i in range(17)]
+        by_id = {event.event_id: event for event in events}
+        results = [FixtureMatchResult(forebet_match=match, status=FixtureMatchStatus.MATCHED_EXACT, sportybet_event=by_id[match.match_id]) for match in matches]
+        with mock.patch("app.services.forebet_draw_engine.match_forebet_fixtures", return_value=results):
+            result = await self.paper_refresh(matches, events)
+        self.assertEqual([day.selection_count for day in result.days], [17, 17, 17])
+        self.assertEqual(result.compilation.status, "overflow")
+        self.assertIsNone(result.compilation.booking_code)
+        self.assertEqual(result.compilation.selection_count, 0)
+        self.assertIn("50 selections", result.compilation.diagnostics[0])
 
     async def test_three_days_one_code_each_and_idempotent(self):
         matches = [fm(d, str(d)) for d in (21, 22, 23, 24)]; events = [ev(d, str(d)) for d in (21, 22, 23, 24)]
@@ -95,8 +119,8 @@ class EngineTests(IsolatedAsyncioTestCase):
     async def test_date_only_forebet_persists_sportybet_kickoff(self):
         match = ForebetMatch(match_id="a", home_team="Home a", away_team="Away a", competition="League", kickoff=date(2026, 8, 21), predicted_result=ForebetPredictionResult.DRAW)
         event = ev(21, "a").model_copy(update={"kickoff": datetime(2026, 8, 21, 22, 30, tzinfo=timezone.utc)})
-        result, create = await self.refresh([match], [event], ["REAL-MOCKED-CODE"])
-        self.assertEqual(create.await_count, 1)
+        result, create = await self.refresh([match], [event], ["REAL-MOCKED-CODE", "COMP"])
+        self.assertEqual(create.await_count, 2)
         self.assertEqual(result.days[0].booking_code, "REAL-MOCKED-CODE")
         self.assertEqual(result.days[0].matches[0].kickoff, event.kickoff)
 
@@ -112,7 +136,7 @@ class EngineTests(IsolatedAsyncioTestCase):
         event = ev(21, "shared")
         results = [FixtureMatchResult(forebet_match=matches[0], status=FixtureMatchStatus.MATCHED_NORMALIZED, sportybet_event=event), FixtureMatchResult(forebet_match=matches[1], status=FixtureMatchStatus.UNMATCHED), FixtureMatchResult(forebet_match=matches[2], status=FixtureMatchStatus.AMBIGUOUS, candidates=[ev(21, "a"), ev(21, "b")]), FixtureMatchResult(forebet_match=matches[3], status=FixtureMatchStatus.MATCHED_NORMALIZED, sportybet_event=event)]
         with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=mock.Mock(forebet_draw_booking_enabled=True)), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=matches), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(1, [event])), mock.patch("app.services.forebet_draw_engine.match_forebet_fixtures", return_value=results), mock.patch("app.services.forebet_draw_engine.create_draw_booking", return_value=mock.Mock(booking_code="ONLY")) as create:
-            response = await self.engine.refresh_window(["url"])
+            response = await self.engine.refresh_window(TARGET_URLS)
         self.assertEqual(len(create.await_args.args[0]), 1)
         self.assertEqual(response.days[0].booking_code, "ONLY")
         self.assertEqual(response.days[0].matches[0].event_id, "shared")
@@ -123,7 +147,8 @@ class EngineTests(IsolatedAsyncioTestCase):
         await self.refresh(matches, events, ["A", "B", "C"])
         result, _ = await self.refresh(matches[1:], events[1:], ["A2", "D"])
         self.assertEqual(result.days[0].booking_code, "A2"); self.assertEqual(result.days[0].matches[0].event_id, "b")
-        result, _ = await self.refresh(matches[2:], events[2:], ["D"])
+        rolled_urls = [f"https://forebet.test/2026-08-{day:02d}" for day in (22, 23, 24)]
+        result, _ = await self.refresh(matches[2:], events[2:], ["D"], rolled_urls)
         self.assertEqual([x.prediction_date.day for x in result.days], [22, 23, 24])
 
     async def test_restart_recovery_and_failed_replacement_keeps_old(self):
@@ -132,13 +157,14 @@ class EngineTests(IsolatedAsyncioTestCase):
         restarted = ForebetDrawEngine(ForebetDrawStore(str(Path(self.tmp.name) / "state.sqlite3")))
         self.assertEqual(restarted.get_active_window().days[0].booking_code, "A")
         with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=mock.Mock(forebet_draw_booking_enabled=True)), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=[fm(21, "b")]), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(1, [ev(21, "b")])), mock.patch("app.services.forebet_draw_engine.create_draw_booking", side_effect=RuntimeError("failed")) as create:
-            await restarted.refresh_window(["url"])
-        create.assert_awaited_once()
-        self.assertEqual(restarted.get_active_window().days[0].booking_code, "A")
+            await restarted.refresh_window(TARGET_URLS)
+        self.assertGreaterEqual(create.await_count, 1)
+        failed = restarted.get_active_window().days[0]
+        self.assertIsNone(failed.booking_code); self.assertEqual(failed.status, "error")
 
     async def test_booking_disabled_skips_booking_and_promotion(self):
         matches, events = [fm(21, "disabled")], [ev(21, "disabled")]
         with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=mock.Mock(forebet_draw_booking_enabled=False)), mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", return_value="html"), mock.patch("app.services.forebet_draw_engine.parse_forebet_html", return_value=matches), mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(1, events)), mock.patch("app.services.forebet_draw_engine.create_draw_booking") as create:
-            result = await self.engine.refresh_window(["url"])
+            result = await self.engine.refresh_window(TARGET_URLS)
         create.assert_not_awaited()
         self.assertEqual(result.active_count, 0)

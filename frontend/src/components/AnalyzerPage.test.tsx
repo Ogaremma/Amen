@@ -55,7 +55,7 @@ describe('AnalyzerPage', () => {
   })
 
   it('renders and copies the API compilation booking', async () => {
-    vi.mocked(api.getForebetDrawWindow).mockResolvedValue({ active_count: 3, days: [day('2026-08-22', 'A'), day('2026-08-23', 'B'), day('2026-08-24', 'C')], compilation: { compilation_id: 'comp-1', identity: 'hash', booking_code: 'PAPER-COMP', selection_count: 6, prediction_dates: ['2026-08-22', '2026-08-23', '2026-08-24'], matches: [], status: 'active', created_at: '2026-08-21T10:00:00Z', updated_at: '2026-08-21T11:00:00Z' } })
+    vi.mocked(api.getForebetDrawWindow).mockResolvedValue({ active_count: 3, days: [day('2026-08-22', 'A'), day('2026-08-23', 'B'), day('2026-08-24', 'C')], compilation: { compilation_id: 'comp-1', identity: 'hash', booking_code: 'PAPER-COMP', selection_count: 6, prediction_dates: ['2026-08-22', '2026-08-23', '2026-08-24'], matches: [], status: 'active', diagnostics: [], created_at: '2026-08-21T10:00:00Z', updated_at: '2026-08-21T11:00:00Z' } })
     vi.mocked(clipboard.copyTextToClipboard).mockResolvedValue(true)
     const user = userEvent.setup(); render(<AnalyzerPage />)
     await user.click(await screen.findByRole('button', { name: 'Compilation' }))

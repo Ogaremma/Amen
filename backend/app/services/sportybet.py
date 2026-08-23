@@ -41,9 +41,10 @@ _AWAY_OUTCOME_ID = "3"
 
 
 class SportyBetUpcomingEventsResult:
-    def __init__(self, total_num: int, events: list[SportyBetEvent]) -> None:
+    def __init__(self, total_num: int, events: list[SportyBetEvent], pages_fetched: int = 1) -> None:
         self.total_num = total_num
         self.events = events
+        self.pages_fetched = pages_fetched
 
 
 def _to_int(value: Any) -> int | None:
@@ -272,8 +273,10 @@ async def get_upcoming_football_events(
 
     all_events: list[SportyBetEvent] = []
     total_num = 0
+    pages_fetched = 0
     for page in range(1, limit + 1):
         result = await _fetch_upcoming_page(page, size)
+        pages_fetched = page
         total_num = result.total_num
         all_events.extend(result.events)
         if not result.events or page * size >= total_num:
@@ -285,7 +288,7 @@ async def get_upcoming_football_events(
         if (start is None or event.kickoff >= start)
         and (end is None or event.kickoff <= end)
     ]
-    return SportyBetUpcomingEventsResult(total_num, filtered)
+    return SportyBetUpcomingEventsResult(total_num, filtered, pages_fetched)
 
 
 def determine_game_status(

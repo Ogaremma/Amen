@@ -36,8 +36,9 @@ class DrawCompilation(BaseModel):
     selection_count: int
     prediction_dates: list[date]
     matches: list[DrawWindowMatch]
-    status: Literal["active", "empty", "error"]
+    status: Literal["active", "unavailable", "overflow", "error"]
     identity: str
+    diagnostics: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

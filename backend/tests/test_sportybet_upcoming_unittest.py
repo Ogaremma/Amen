@@ -52,3 +52,14 @@ class UpcomingTests(IsolatedAsyncioTestCase):
             result = await sportybet.get_upcoming_football_events(page_size=1, max_pages=3, start_datetime=datetime.fromtimestamp(1787338800, timezone.utc), end_datetime=datetime.fromtimestamp(1787338800, timezone.utc) + timedelta(hours=1))
         self.assertEqual(result.total_num, 2)
         self.assertEqual([x.event_id for x in result.events], ["sr:match:1"])
+
+    async def test_pagination_continues_until_total_is_covered(self):
+        pages = []
+        for index in range(5):
+            item = event(1787338800000 + index * 60000); item["eventId"] = f"sr:match:{index}"
+            pages.append(sportybet.parse_upcoming_events_page(payload([item], total=5)))
+        with mock.patch.object(sportybet, "_fetch_upcoming_page", side_effect=pages) as fetch:
+            result = await sportybet.get_upcoming_football_events(page_size=1, max_pages=10)
+        self.assertEqual(fetch.await_count, 5)
+        self.assertEqual(result.pages_fetched, 5)
+        self.assertEqual(len(result.events), 5)
