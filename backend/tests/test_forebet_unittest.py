@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -191,6 +192,48 @@ def test_browser_response_without_fixture_table_is_challenge():
 
     with pytest.raises(ForebetBrowserChallengeError, match="no fixture table"):
         _validate_browser_forebet_html("<html><body>Forebet</body></html>", "https://www.forebet.com/test", "www.forebet.com")
+
+
+def test_browser_validation_logs_interstitial_details(caplog):
+    from app.services.forebet import _validate_and_log_browser_page, ForebetBrowserChallengeError
+
+    with caplog.at_level(logging.INFO, logger="amen.forebet"):
+        with pytest.raises(ForebetBrowserChallengeError):
+            _validate_and_log_browser_page(
+                "<html><head><title>Just a moment...</title></head><body>Just a moment</body></html>",
+                SOURCE_URL,
+                "www.forebet.com",
+                title="Just a moment...",
+                elapsed_ms=30123,
+                schema_count=0,
+                fixture_rows=0,
+            )
+    message = caplog.records[-1].getMessage()
+    assert "outcome=rejected" in message
+    assert "rule=challenge_indicator" in message
+    assert "challenge_indicator='just a moment'" in message
+    assert "elapsed_ms=30123" in message
+    assert "schema_count=0 fixture_rows=0" in message
+
+
+def test_browser_validation_logs_valid_page_details(caplog):
+    from app.services.forebet import _validate_and_log_browser_page
+
+    with caplog.at_level(logging.INFO, logger="amen.forebet"):
+        _validate_and_log_browser_page(
+            '<html><body>Forebet<div class="schema"><div class="rcnt"></div></div></body></html>',
+            SOURCE_URL,
+            "www.forebet.com",
+            title="Football Predictions | Forebet",
+            elapsed_ms=842,
+            schema_count=1,
+            fixture_rows=1,
+        )
+    message = caplog.records[-1].getMessage()
+    assert "outcome=success rule=valid" in message
+    assert "title='Football Predictions | Forebet'" in message
+    assert "final_host=www.forebet.com" in message
+    assert "elapsed_ms=842 schema_count=1 fixture_rows=1" in message
 
 
 def test_malformed_response_is_rejected():

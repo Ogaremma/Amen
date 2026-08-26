@@ -240,6 +240,52 @@ def _validate_browser_forebet_html(html: str, final_url: str, expected_host: str
         raise ForebetBrowserChallengeError("Forebet browser response contained no fixture table")
 
 
+def _validate_and_log_browser_page(
+    html: str,
+    final_url: str,
+    expected_host: str,
+    *,
+    title: str,
+    elapsed_ms: int,
+    schema_count: int,
+    fixture_rows: int,
+) -> None:
+    final_host = urlparse(final_url).hostname
+    validation_rule = "valid"
+    challenge_indicator = None
+    lowered = html.lower()
+    if final_host != expected_host:
+        validation_rule = "wrong_hostname"
+    else:
+        challenge_indicator = next(
+            (marker for marker in ("captcha", "verify you are human", "access denied", "cloudflare ray id", "attention required", "just a moment") if marker in lowered),
+            None,
+        )
+        if challenge_indicator:
+            validation_rule = "challenge_indicator"
+        elif not html.strip() or "<html" not in lowered:
+            validation_rule = "empty_or_malformed"
+        elif "forebet" not in lowered:
+            validation_rule = "missing_forebet_text"
+        elif not re.search(r'class=["\'][^"\']*schema[^"\']*["\']', html, re.IGNORECASE):
+            validation_rule = "missing_schema_class"
+
+    logger.warning(
+        "browser_validation outcome=%s rule=%s challenge_indicator=%r title=%r "
+        "final_url=%s final_host=%s elapsed_ms=%s schema_count=%s fixture_rows=%s",
+        "success" if validation_rule == "valid" else "rejected",
+        validation_rule,
+        challenge_indicator,
+        title,
+        final_url,
+        final_host,
+        elapsed_ms,
+        schema_count,
+        fixture_rows,
+    )
+    _validate_browser_forebet_html(html, final_url, expected_host)
+
+
 def _fetch_forebet_page_browser_sync(url: str) -> str:
     """Acquire one Forebet page using synchronous Playwright.
 
@@ -321,24 +367,14 @@ def _fetch_forebet_page_browser_sync(url: str) -> str:
                 else 0
             )
 
-            logger.info(
-                "browser_navigation status=%s content_type=%s "
-                "title=%r final_host=%s schema=%s fixture_rows=%s "
-                "redirects=%s duration_ms=%s",
-                response.status if response else None,
-                content_type,
-                title,
-                final_host,
-                has_schema,
-                fixture_rows,
-                redirect_count,
-                int((time.monotonic() - started) * 1000),
-            )
-
-            _validate_browser_forebet_html(
+            _validate_and_log_browser_page(
                 html,
                 page.url,
                 expected_host or "",
+                title=title,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                schema_count=int(has_schema),
+                fixture_rows=fixture_rows,
             )
             _remember_clearance_cookies(context.cookies())
 
