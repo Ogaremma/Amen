@@ -100,6 +100,25 @@ def _parse_kickoff(value: str | None) -> date | datetime | None:
             return None
 
 
+def _parse_forebet_kickoff(time_node) -> date | datetime | None:
+    """Parse Forebet's startDate, including the visible local kickoff time.
+
+    Forebet snapshots commonly put only YYYY-MM-DD in the schema datetime
+    attribute and put the actual HH:MM in ``.date_bah``.
+    """
+    if time_node is None:
+        return None
+    visible = _text(time_node.select_one(".date_bah"))
+    if visible:
+        for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
+            try:
+                parsed = datetime.strptime(visible, fmt)
+                return parsed if "%H" in fmt else parsed.date()
+            except ValueError:
+                continue
+    return _parse_kickoff(time_node.get("datetime"))
+
+
 def parse_forebet_html(html: str, source_url: str | None = None) -> list[ForebetMatch]:
     soup = BeautifulSoup(html, "html.parser")
     matches: list[ForebetMatch] = []
@@ -130,7 +149,7 @@ def parse_forebet_html(html: str, source_url: str | None = None) -> list[Forebet
             match_id=match_id.get("id") if match_id else None,
             home_team=home, away_team=away, competition=competition, country=country,
             competition_code=_text(row.select_one(".shortTag")),
-            kickoff=_parse_kickoff(kickoff_node.get("datetime") if kickoff_node else None),
+            kickoff=_parse_forebet_kickoff(kickoff_node),
             kickoff_display=_text(row.select_one(".date_bah")),
             match_url=urljoin(source_url or get_settings().forebet_base_url, match_href.get("href")) if match_href and match_href.get("href") else None,
             predicted_result=_parse_prediction_result(_text(row.select_one(".predict .forepr"))),

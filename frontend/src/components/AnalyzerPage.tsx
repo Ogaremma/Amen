@@ -17,6 +17,13 @@ function formatTimestamp(value: string) {
   return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
 }
 
+function statusMessage(day: ForebetDrawWindowDay) {
+  if (day.diagnostic_message) return day.diagnostic_message
+  if (day.status === 'active' && day.booking_code?.startsWith('PAPER-')) return 'Paper booking generated. No real SportyBet bet was created.'
+  if (day.status === 'unavailable') return 'No valid selections are currently available.'
+  return day.status.toUpperCase()
+}
+
 function BookingDayCard({ day }: { day: ForebetDrawWindowDay }) {
   const [copied, setCopied] = useState(false)
   async function copyCode() {
@@ -30,10 +37,13 @@ function BookingDayCard({ day }: { day: ForebetDrawWindowDay }) {
       <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-300">Forebet Draw Predictions</p><h2 className="mt-1 text-xl font-semibold text-white">Draw Predictions for {formatDate(day.prediction_date)}</h2></div>
       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${day.status === 'active' ? 'bg-emerald-400/15 text-emerald-200' : day.status === 'complete' ? 'bg-slate-400/15 text-slate-300' : 'bg-red-400/15 text-red-200'}`}>{day.status}</span>
     </div>
-    <div className="mt-5 flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/10 px-4 py-3"><p className="text-xs text-slate-500">SportyBet booking code</p><p className="mt-1 break-all font-mono text-2xl font-bold tracking-wider text-white">{day.booking_code ?? 'Booking unavailable'}</p></div>{day.booking_code && <Button variant="outline" onClick={copyCode} aria-label={`Copy booking code for ${day.prediction_date}`}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? 'Copied' : 'Copy'}</Button>}</div>
-    <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-300"><span>{day.selection_count} draw {day.selection_count === 1 ? 'selection' : 'selections'}</span><span>Updated {formatTimestamp(day.last_updated)}</span></div>
+    <div className="mt-5 flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/10 px-4 py-3"><p className="text-xs text-slate-500">{day.booking_code?.startsWith('PAPER-') ? 'Paper booking code' : 'SportyBet booking code'}</p><p className="mt-1 break-all font-mono text-2xl font-bold tracking-wider text-white">{day.booking_code ?? 'Booking unavailable'}</p></div>{day.booking_code && <Button variant="outline" onClick={copyCode} aria-label={`Copy booking code for ${day.prediction_date}`}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? 'Copied' : 'Copy'}</Button>}</div>
+    <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-300"><span>{day.selection_count} valid {day.selection_count === 1 ? 'selection' : 'selections'}</span><span>Status: {statusMessage(day)}</span><span>Updated {formatTimestamp(day.last_updated)}</span></div>
     {day.matches.length > 0 && <div className="mt-4 space-y-3">{day.matches.map((match) => <div key={`${match.event_id}-${match.product_id}`} className="border-t border-white/10 pt-3 text-sm"><p className="text-slate-100">{match.home_team} vs {match.away_team}</p><p className="mt-1 text-slate-400"><span className="text-yellow-300">{formatDate(match.kickoff.slice(0, 10))}</span> · {new Date(match.kickoff).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · DRAW</p></div>)}</div>}
     {day.matches.length === 0 && <p className="mt-4 text-sm text-slate-400">No valid DRAW selections found.</p>}
+    {(day.batches?.length ?? 0) > 1 && <div className="mt-4 text-xs text-slate-400">{day.batches?.map((batch) => <p key={batch.batch_index}>Batch {batch.batch_index}: {batch.booking_code ?? 'unavailable'} ({batch.matches.length} selections)</p>)}</div>}
+    {day.monitoring?.exhausted === false && <p className="mt-3 text-xs text-amber-200">Monitoring provider status</p>}
+    {(day.rebook_events?.length ?? 0) > 0 && <div className="mt-3 text-xs text-slate-400"><p>{day.rebook_events?.length} rebook update{day.rebook_events?.length === 1 ? '' : 's'} recorded</p>{day.rebook_events?.slice(0, 3).map((event) => <p key={`${event.timestamp}-${event.batch_index}`}>{event.reasons.join(', ')}: {event.old_code ?? 'none'} → {event.new_code ?? 'none'}</p>)}</div>}
   </Card>
 }
 

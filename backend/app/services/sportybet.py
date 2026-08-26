@@ -41,10 +41,21 @@ _AWAY_OUTCOME_ID = "3"
 
 
 class SportyBetUpcomingEventsResult:
-    def __init__(self, total_num: int, events: list[SportyBetEvent], pages_fetched: int = 1) -> None:
+    def __init__(self, total_num: int, events: list[SportyBetEvent], pages_fetched: int = 1, *, retrieved_at: datetime | None = None, complete: bool = True, retrieved_num: int | None = None) -> None:
         self.total_num = total_num
         self.events = events
         self.pages_fetched = pages_fetched
+        self.retrieved_at = retrieved_at or datetime.now(timezone.utc)
+        self.complete = complete
+        self.retrieved_num = len(events) if retrieved_num is None else retrieved_num
+
+    def is_fresh(self, ttl_seconds: float, *, now: datetime | None = None) -> bool:
+        current = now or datetime.now(timezone.utc)
+        return (current - self.retrieved_at).total_seconds() <= ttl_seconds
+
+    def diagnostics(self, ttl_seconds: float, *, now: datetime | None = None) -> dict[str, Any]:
+        fresh = self.is_fresh(ttl_seconds, now=now)
+        return {"expected_total": self.total_num, "retrieved_total": self.retrieved_num, "parsed_events": len(self.events), "pages_fetched": self.pages_fetched, "pagination_complete": self.complete, "retrieved_at": self.retrieved_at.isoformat(), "fresh": fresh, "stale": not fresh, "authoritative": self.complete and fresh}
 
 
 def _to_int(value: Any) -> int | None:
@@ -90,7 +101,7 @@ def _parse_upcoming_event(raw: Any) -> SportyBetEvent | None:
             if (
                 isinstance(outcome, dict)
                 and str(outcome.get("id")) == outcome_id
-                and outcome.get("isActive") in (1, "1", True)
+                and outcome.get("isActive", True) not in (0, "0", False)
             ):
                 return outcome
         return None
@@ -274,12 +285,19 @@ async def get_upcoming_football_events(
     all_events: list[SportyBetEvent] = []
     total_num = 0
     pages_fetched = 0
+    retrieved_num = 0
+    complete = False
     for page in range(1, limit + 1):
         result = await _fetch_upcoming_page(page, size)
         pages_fetched = page
         total_num = result.total_num
         all_events.extend(result.events)
-        if not result.events or page * size >= total_num:
+        retrieved_num += len(result.events)
+        if not result.events:
+            complete = True
+            break
+        if page * size >= total_num:
+            complete = True
             break
 
     filtered = [
@@ -288,7 +306,7 @@ async def get_upcoming_football_events(
         if (start is None or event.kickoff >= start)
         and (end is None or event.kickoff <= end)
     ]
-    return SportyBetUpcomingEventsResult(total_num, filtered, pages_fetched)
+    return SportyBetUpcomingEventsResult(total_num, filtered, pages_fetched, retrieved_at=datetime.now(timezone.utc), complete=complete, retrieved_num=retrieved_num)
 
 
 def determine_game_status(

@@ -178,9 +178,17 @@ export interface ForebetDrawWindowDay {
   matches: ForebetDrawWindowMatch[]
   source_urls: string[]
   diagnostics: string[]
+  diagnostic_code?: string | null
+  diagnostic_message?: string | null
+  identity?: string | null
   created_at: string
   last_updated: string
+  batches?: ForebetDrawBatch[]
+  monitoring?: Record<string, unknown>
+  rebook_events?: ForebetRebookEvent[]
 }
+export interface ForebetDrawBatch { batch_index: number; booking_code: string | null; identity: string; status: string; matches: ForebetDrawWindowMatch[] }
+export interface ForebetRebookEvent { scope: string; batch_index: number | null; removed: string[]; reasons: string[]; old_code: string | null; new_code: string | null; timestamp: string }
 export interface ForebetDrawCompilation {
   compilation_id: string
   identity: string
@@ -190,8 +198,12 @@ export interface ForebetDrawCompilation {
   matches: ForebetDrawWindowMatch[]
   status: 'active' | 'unavailable' | 'overflow' | 'error'
   diagnostics: string[]
+  diagnostic_code?: string | null
+  diagnostic_message?: string | null
   created_at: string
   updated_at: string
+  batches?: ForebetDrawBatch[]
+  rebook_events?: ForebetRebookEvent[]
 }
 
 export interface ForebetDrawWindowResponse {

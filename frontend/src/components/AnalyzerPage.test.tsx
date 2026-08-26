@@ -63,4 +63,31 @@ describe('AnalyzerPage', () => {
     await user.click(screen.getByRole('button', { name: /Copy compilation booking code/i }))
     expect(clipboard.copyTextToClipboard).toHaveBeenCalledWith('PAPER-COMP')
   })
+
+  it('renders each booking batch and its code', async () => {
+    vi.mocked(api.getForebetDrawWindow).mockResolvedValue({ active_count: 1, days: [{ ...day('2026-08-22', 'PAPER-A'), batches: [{ batch_index: 1, booking_code: 'PAPER-A', identity: 'a', status: 'active', matches: [] }, { batch_index: 2, booking_code: 'PAPER-B', identity: 'b', status: 'active', matches: [] }] }] })
+    render(<AnalyzerPage />)
+    expect(await screen.findByText(/Batch 1: PAPER-A/)).toBeInTheDocument()
+    expect(screen.getByText(/Batch 2: PAPER-B/)).toBeInTheDocument()
+  })
+
+  it('shows the live monitoring indicator for an open monitored day', async () => {
+    vi.mocked(api.getForebetDrawWindow).mockResolvedValue({ active_count: 1, days: [{ ...day('2026-08-22', 'CODE'), monitoring: { exhausted: false } }] })
+    render(<AnalyzerPage />)
+    expect(await screen.findByText('Monitoring provider status')).toBeInTheDocument()
+  })
+
+  it('renders recent rebook history with reason and code transition', async () => {
+    vi.mocked(api.getForebetDrawWindow).mockResolvedValue({ active_count: 1, days: [{ ...day('2026-08-22', 'NEW'), rebook_events: [{ scope: 'daily', batch_index: 1, removed: ['a'], reasons: ['finished'], old_code: 'OLD', new_code: 'NEW', timestamp: '2026-08-22T12:00:00Z' }] }] })
+    render(<AnalyzerPage />)
+    expect(await screen.findByText('1 rebook update recorded')).toBeInTheDocument()
+    expect(screen.getByText(/finished: OLD → NEW/)).toBeInTheDocument()
+  })
+
+  it('labels paper and real booking codes distinctly', async () => {
+    vi.mocked(api.getForebetDrawWindow).mockResolvedValue({ active_count: 2, days: [day('2026-08-22', 'PAPER-ABC'), day('2026-08-23', 'REAL123')] })
+    render(<AnalyzerPage />)
+    expect((await screen.findAllByText('Paper booking code')).length).toBe(1)
+    expect(screen.getAllByText('SportyBet booking code').length).toBe(1)
+  })
 })

@@ -1,0 +1,74 @@
+# Paper-only deployment: real-booking flags must remain false. Do not set them
+# true in this file without explicit approval.
+services:
+  - type: web
+    name: amen-backend-staging
+    runtime: docker
+    plan: standard # 2 GB RAM class; increase if staging metrics show Chromium pressure.
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /readiness
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: FOREBET_INGESTION_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBAPP_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+      - key: FOREBET_DRAW_BOOKING_ENABLED
+        value: "false"
+      - key: FOREBET_REAL_BOOKING_AUTHORIZED
+        value: "false"
+      - key: FOREBET_DRAW_PAPER_BOOKING_ENABLED
+        value: "true"
+      - key: FOREBET_WORKER_ENABLED
+        value: "true"
+      - key: FOREBET_BROWSER_FALLBACK_ENABLED
+        value: "true"
+
+      - key: FOREBET_BASE_URL
+        value: https://www.forebet.com
+      - key: FOREBET_TIMEOUT
+        value: "20"
+      - key: FOREBET_RETRIES
+        value: "2"
+      - key: FOREBET_RETRY_BACKOFF
+        value: "0.5"
+      - key: FOREBET_BROWSER_TIMEOUT
+        value: "30"
+      - key: FOREBET_DRAW_REFRESH_INTERVAL_SECONDS
+        value: "900"
+      - key: FOREBET_DRAW_PRUNE_INTERVAL_SECONDS
+        value: "60"
+      - key: FOREBET_DRAW_MISSING_EVENT_TIMEOUT_HOURS
+        value: "6"
+      - key: FOREBET_WORKER_LOCK_SECONDS
+        value: "840"
+
+      - key: SPORTYBET_BASE_URL
+        value: https://www.sportybet.com
+      - key: SPORTYBET_SHARE_PATH
+        value: /api/ng/orders/share
+      - key: SPORTYBET_UPCOMING_PATH
+        value: /api/ng/factsCenter/pcUpcomingEvents
+      - key: SPORTYBET_FOOTBALL_SPORT_ID
+        value: sr:sport:1
+      - key: SPORTYBET_UPCOMING_MARKET_IDS
+        value: "1,18,10,29,11,26,36,14,60100"
+      - key: SPORTYBET_UPCOMING_PAGE_SIZE
+        value: "100"
+      - key: SPORTYBET_UPCOMING_MAX_PAGES
+        value: "20"
+      - key: SPORTYBET_TIMEOUT
+        value: "20"
+      - key: SPORTYBET_ACQUISITION_TTL_SECONDS
+        value: "300"
+
+      - key: TELEGRAM_AUTH_MAX_AGE
+        value: "86400"

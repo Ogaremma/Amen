@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
+import uuid
 from datetime import datetime, timezone
 
 from app.config.settings import get_settings
@@ -15,11 +17,14 @@ class ForebetDrawRefreshWorker:
     def __init__(self, engine: ForebetDrawEngine = forebet_draw_engine) -> None:
         self.engine = engine
         self._task: asyncio.Task | None = None
+        self._prune_task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self.last_started: datetime | None = None
         self.last_completed: datetime | None = None
         self.last_failure: str | None = None
         self.last_failure_stage: str | None = None
+        self.last_prune_completed: datetime | None = None
+        self.owner_id = f"{socket.gethostname()}:{uuid.uuid4()}"
 
     @property
     def running(self) -> bool:
@@ -31,6 +36,7 @@ class ForebetDrawRefreshWorker:
             return
         self._stop = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name="forebet-draw-refresh-worker")
+        self._prune_task = asyncio.create_task(self._run_prune(), name="forebet-draw-prune-worker")
         self.last_started = datetime.now(timezone.utc)
         logger.info("worker_started interval_seconds=%s", get_settings().forebet_draw_refresh_interval_seconds)
         await asyncio.sleep(0)
@@ -42,16 +48,28 @@ class ForebetDrawRefreshWorker:
         logger.info("worker_shutdown_started")
         self._stop.set()
         await task
+        if self._prune_task is not None:
+            await self._prune_task
+            self._prune_task = None
         self._task = None
         logger.info("worker_shutdown_completed")
 
     async def _run(self) -> None:
         settings = get_settings()
         interval = settings.forebet_draw_refresh_interval_seconds
-        configured_urls = [url.strip() for url in settings.forebet_draw_source_urls.split(",") if url.strip()]
         while not self._stop.is_set():
-            source_urls = configured_urls or future_prediction_urls()
+            source_urls = future_prediction_urls()
             logger.info("refresh_started source_count=%s", len(source_urls))
+            lock_seconds = getattr(settings, "forebet_worker_lock_seconds", max(30, int(interval) - 60))
+            store = getattr(self.engine, "store", None)
+            acquired = store.acquire_job_lock("rolling-draw-refresh", self.owner_id, lock_seconds) if store and hasattr(store, "acquire_job_lock") else True
+            if not acquired:
+                logger.info("refresh_skipped reason=distributed_lock_held")
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=interval)
+                except asyncio.TimeoutError:
+                    continue
+                continue
             try:
                 before = {day.prediction_date: day.booking_code for day in self.engine.get_active_window().days}
                 response = await self.engine.refresh_window(source_urls)
@@ -69,6 +87,31 @@ class ForebetDrawRefreshWorker:
                 self.last_failure = f"{type(exc).__name__}: {str(exc)[:500]}"
                 self.last_failure_stage = "refresh_window"
                 logger.exception("refresh_failed")
+            finally:
+                if store and hasattr(store, "release_job_lock"):
+                    store.release_job_lock("rolling-draw-refresh", self.owner_id)
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                continue
+
+    async def _run_prune(self) -> None:
+        interval = getattr(get_settings(), "forebet_draw_prune_interval_seconds", 60.0)
+        store = getattr(self.engine, "store", None)
+        while not self._stop.is_set():
+            acquired = store.acquire_job_lock("rolling-draw-prune", self.owner_id, max(30, int(interval) + 30)) if store and hasattr(store, "acquire_job_lock") else True
+            if acquired:
+                try:
+                    if hasattr(self.engine, "prune_kickoff_passed"):
+                        await self.engine.prune_kickoff_passed()
+                    self.last_prune_completed = datetime.now(timezone.utc)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("prune_failed")
+                finally:
+                    if store and hasattr(store, "release_job_lock"):
+                        store.release_job_lock("rolling-draw-prune", self.owner_id)
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=interval)
             except asyncio.TimeoutError:

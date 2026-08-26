@@ -16,6 +16,10 @@ def ev(day, name, event_id=None):
     return SportyBetEvent(event_id=event_id or name, home_team=f"Home {name}", away_team=f"Away {name}", kickoff=datetime(2026, 8, day, 12, tzinfo=timezone.utc), competition="League", sport_id="sr:sport:1", market_id="1", outcome_draw_id="2", product_id=3, match_status="Not start")
 
 class SnapshotExecutionTests(IsolatedAsyncioTestCase):
+    def test_trusted_snapshot_date_filter_uses_lagos_date(self):
+        self.assertEqual(ingestion._kickoff_lagos_date(datetime(2026, 8, 24, 23, 30, tzinfo=timezone.utc)), date(2026, 8, 25))
+        self.assertEqual(ingestion._kickoff_lagos_date(date(2026, 8, 25)), date(2026, 8, 25))
+
     async def asyncSetUp(self):
         self.tmp = TemporaryDirectory()
         self.store = ForebetDrawStore(str(Path(self.tmp.name) / "state.sqlite3"))

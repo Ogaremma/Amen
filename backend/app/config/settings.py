@@ -15,13 +15,15 @@ class Settings(BaseSettings):
     forebet_retries: int = Field(default=2, validation_alias="FOREBET_RETRIES", ge=0, le=5)
     forebet_retry_backoff: float = Field(default=0.5, validation_alias="FOREBET_RETRY_BACKOFF", ge=0)
     forebet_draw_refresh_interval_seconds: float = Field(default=900.0, validation_alias="FOREBET_DRAW_REFRESH_INTERVAL_SECONDS", gt=0)
+    forebet_draw_prune_interval_seconds: float = Field(default=60.0, validation_alias="FOREBET_DRAW_PRUNE_INTERVAL_SECONDS", gt=0)
+    forebet_draw_missing_event_timeout_hours: float = Field(default=6.0, validation_alias="FOREBET_DRAW_MISSING_EVENT_TIMEOUT_HOURS", gt=0)
     forebet_draw_source_urls: str = Field(default="", validation_alias="FOREBET_DRAW_SOURCE_URLS")
     forebet_browser_fallback_enabled: bool = Field(default=True, validation_alias="FOREBET_BROWSER_FALLBACK_ENABLED")
     forebet_browser_timeout: float = Field(default=30.0, validation_alias="FOREBET_BROWSER_TIMEOUT", gt=0, le=120)
     forebet_draw_selection_limit: int = Field(default=5, validation_alias="FOREBET_DRAW_SELECTION_LIMIT", ge=1)
     forebet_ingestion_token: str | None = Field(default=None, validation_alias="FOREBET_INGESTION_TOKEN")
     forebet_draw_booking_enabled: bool = Field(default=False, validation_alias="FOREBET_DRAW_BOOKING_ENABLED")
-    forebet_draw_paper_booking_enabled: bool = Field(default=False, validation_alias="FOREBET_DRAW_PAPER_BOOKING_ENABLED")
+    forebet_draw_paper_booking_enabled: bool = Field(default=True, validation_alias="FOREBET_DRAW_PAPER_BOOKING_ENABLED")
 
     # ---------------------------------------------------------
     # SportyBet
@@ -70,6 +72,12 @@ class Settings(BaseSettings):
         validation_alias="SPORTYBET_TIMEOUT",
     )
 
+    sportybet_acquisition_ttl_seconds: float = Field(
+        default=300.0,
+        validation_alias="SPORTYBET_ACQUISITION_TTL_SECONDS",
+        gt=0,
+    )
+
     sportybet_user_agent: str = Field(
         default=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -116,6 +124,12 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173"],
         validation_alias="CORS_ORIGINS",
     )
+
+    forebet_worker_enabled: bool = Field(default=True, validation_alias="FOREBET_WORKER_ENABLED")
+    forebet_worker_lock_seconds: int = Field(default=840, validation_alias="FOREBET_WORKER_LOCK_SECONDS", ge=30)
+    # A second, deliberately explicit authorization is required in addition to
+    # FOREBET_DRAW_BOOKING_ENABLED. Paper mode remains the safe default.
+    forebet_real_booking_authorized: bool = Field(default=False, validation_alias="FOREBET_REAL_BOOKING_AUTHORIZED")
 
     # ---------------------------------------------------------
     # Pydantic Settings configuration

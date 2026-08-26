@@ -3,6 +3,8 @@ from unittest import IsolatedAsyncioTestCase, mock
 
 from app.services import sportybet
 from fastapi import HTTPException
+import json
+from pathlib import Path
 
 
 def payload(events, total=1):
@@ -14,6 +16,15 @@ def event(start=1787338800000):
 
 
 class UpcomingTests(IsolatedAsyncioTestCase):
+    def test_real_nested_response_fixture(self):
+        raw = json.loads((Path(__file__).parent / "fixtures" / "sportybet_real_response_sample.json").read_text())
+        item = sportybet.parse_upcoming_events_page(raw).events[0]
+        self.assertEqual(item.event_id, "sr:match:72221172")
+        self.assertEqual((item.home_team, item.away_team), ("Fulham", "Chelsea"))
+        self.assertEqual((item.market_id, item.outcome_draw_id, item.product_id, item.sport_id), ("1", "2", 3, "sr:sport:1"))
+        self.assertEqual(item.odds_draw, 4.02)
+        self.assertEqual(item.competition, "Premier League")
+
     def test_parse_verified_shape(self):
         result = sportybet.parse_upcoming_events_page(payload([event()]))
         item = result.events[0]
@@ -63,3 +74,14 @@ class UpcomingTests(IsolatedAsyncioTestCase):
         self.assertEqual(fetch.await_count, 5)
         self.assertEqual(result.pages_fetched, 5)
         self.assertEqual(len(result.events), 5)
+
+    async def test_pagination_966_requires_ten_pages(self):
+        pages = [sportybet.parse_upcoming_events_page(payload([event(1787338800000 + i * 60000)], total=966)) for i in range(10)]
+        with mock.patch.object(sportybet, "_fetch_upcoming_page", side_effect=pages) as fetch:
+            result = await sportybet.get_upcoming_football_events(page_size=100, max_pages=20)
+        self.assertEqual(fetch.await_count, 10); self.assertEqual(result.pages_fetched, 10)
+
+    async def test_empty_page_stops_safely(self):
+        with mock.patch.object(sportybet, "_fetch_upcoming_page", side_effect=[sportybet.parse_upcoming_events_page(payload([], total=966))]) as fetch:
+            result = await sportybet.get_upcoming_football_events(page_size=100, max_pages=20)
+        self.assertEqual(fetch.await_count, 1); self.assertEqual(result.events, [])

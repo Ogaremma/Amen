@@ -61,7 +61,7 @@ def test_first_match_fields(matches):
     assert match.competition == "Liga de Expansion MX"
     assert match.country == "Mexico"
     assert match.competition_code == "Mx2"
-    assert str(match.kickoff) == "2026-08-21"
+    assert str(match.kickoff).startswith("2026-08-21")
     assert match.kickoff_display == "21/08/2026 0:00"
     assert match.predicted_result == ForebetPredictionResult.DRAW
     assert (match.predicted_score_home, match.predicted_score_away) == (2, 2)

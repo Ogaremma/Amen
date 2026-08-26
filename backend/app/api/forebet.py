@@ -9,12 +9,15 @@ from app.config.settings import get_settings
 from app.schemas.forebet import DrawBookingRequest, DrawBookingResponse, ForebetAnalyzeRequest, ForebetAnalyzeResponse, FixtureMatchDateGroup, SportyBetEvent
 from app.services.fixture_matching import match_forebet_fixtures
 from app.services.forebet import fetch_forebet_page, get_draw_matches, parse_forebet_html
+from app.services.sportybet import parse_upcoming_events_page
 from app.services.sportybet import create_draw_booking
 from app.schemas.forebet_draw_window import DrawWindowRefreshRequest, DrawWindowResponse
 from app.services.forebet_draw_engine import forebet_draw_engine
 from app.services.forebet_draw_diagnostics import run_forebet_draw_diagnostics
-from app.schemas.forebet_ingestion import ForebetAcquisitionSnapshotRequest
+from app.schemas.forebet_ingestion import ForebetAcquisitionSnapshotRequest, SportyBetFixtureSnapshotRequest
 from app.services.forebet_ingestion import dry_run_snapshot, execute_snapshot
+import json
+from app.services.forebet_dates import future_prediction_dates
 
 router = APIRouter(prefix="/api/v1/forebet", tags=["forebet"])
 
@@ -29,9 +32,38 @@ async def ingest_acquisition_snapshots(request: ForebetAcquisitionSnapshotReques
     settings = get_settings()
     if request.dry_run:
         return await dry_run_snapshot(request)
-    if not settings.forebet_draw_booking_enabled:
+    if not (settings.forebet_draw_booking_enabled and settings.forebet_real_booking_authorized):
         raise HTTPException(status_code=409, detail="Forebet draw booking is disabled")
     return await execute_snapshot(request)
+
+@router.post("/sportybet-fixture-snapshots")
+async def ingest_sportybet_fixture_snapshot(request: SportyBetFixtureSnapshotRequest, authorization: str | None = Header(default=None)) -> dict:
+    _verify_ingestion_token(authorization)
+    settings = get_settings()
+    dates = set(future_prediction_dates())
+    supplied_events = list(request.events)
+    page_metadata = []
+    for payload in request.raw_pages:
+        parsed = parse_upcoming_events_page(payload)
+        supplied_events.extend(parsed.events)
+        page_metadata.append({"total_num": parsed.total_num, "events": len(parsed.events)})
+    valid = []
+    seen = set()
+    for event in supplied_events:
+        if event.sport_id != settings.sportybet_football_sport_id:
+            raise HTTPException(status_code=422, detail=f"Non-football event rejected: {event.event_id}")
+        if not event.event_id or not event.home_team or not event.away_team or not event.kickoff:
+            raise HTTPException(status_code=422, detail="Malformed SportyBet fixture snapshot")
+        if event.kickoff.date() not in dates:
+            continue
+        identity = (event.event_id, event.market_id, event.outcome_draw_id, event.product_id, event.sport_id, event.specifier or "")
+        if identity in seen: continue
+        seen.add(identity); valid.append(event)
+    if not valid:
+        raise HTTPException(status_code=422, detail="Snapshot contains no football events in the rolling window")
+    raw = json.dumps(request.raw_pages if request.raw_pages else [event.model_dump(mode="json") for event in supplied_events], sort_keys=True)
+    inserted = forebet_draw_engine.store.save_sportybet_snapshot(raw, request.retrieved_at, source=request.source)
+    return {"accepted": len(valid), "received": len(supplied_events), "duplicate_snapshot": not inserted, "pages": page_metadata, "events": valid}
 
 
 class ForebetMatchesRequest(ForebetAnalyzeRequest):
@@ -99,9 +131,10 @@ async def get_draw_window_diagnostics() -> dict:
 
 @router.post("/draw-window/refresh", response_model=DrawWindowResponse)
 async def refresh_draw_window(request: DrawWindowRefreshRequest) -> DrawWindowResponse:
-    return await forebet_draw_engine.refresh_window(request.source_urls, request.start_datetime, request.end_datetime)
+    return await forebet_draw_engine.refresh_rolling()
 
 
 @router.post("/draw-window/{prediction_date}/refresh", response_model=DrawWindowResponse)
 async def refresh_draw_window_day(prediction_date: date, request: DrawWindowRefreshRequest) -> DrawWindowResponse:
-    return await forebet_draw_engine.refresh_day(prediction_date, request.source_urls, request.start_datetime, request.end_datetime)
+    response = await forebet_draw_engine.refresh_rolling()
+    return response.model_copy(update={"days": [day for day in response.days if day.prediction_date == prediction_date], "active_count": sum(day.prediction_date == prediction_date and day.status == "active" for day in response.days)})

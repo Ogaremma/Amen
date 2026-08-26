@@ -1,0 +1,47 @@
+{
+  "bizCode": 10000,
+  "message": "0#0",
+  "data": {
+    "totalNum": 966,
+    "tournaments": [
+      {
+        "id": "sr:tournament:17",
+        "name": "Premier League",
+        "events": [
+          {
+            "eventId": "sr:match:72221172",
+            "gameId": "40427",
+            "productStatus": "0#0",
+            "estimateStartTime": 1787598000000,
+            "status": 0,
+            "matchStatus": "Not start",
+            "homeTeamId": "sr:competitor:43",
+            "homeTeamName": "Fulham",
+            "awayTeamName": "Chelsea",
+            "awayTeamId": "sr:competitor:38",
+            "sport": {
+              "id": "sr:sport:1",
+              "name": "Football",
+              "category": {
+                "id": "sr:category:1",
+                "name": "England",
+                "tournament": {"id": "sr:tournament:17", "name": "Premier League"}
+              }
+            },
+            "markets": [{
+              "id": "1",
+              "product": 3,
+              "desc": "1X2",
+              "status": 0,
+              "outcomes": [
+                {"id": "1", "odds": "4.05", "desc": "Home"},
+                {"id": "2", "odds": "4.02", "desc": "Draw"},
+                {"id": "3", "odds": "1.91", "desc": "Away"}
+              ]
+            }]
+          }
+        ]
+      }
+    ]
+  }
+}
