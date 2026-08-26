@@ -4,6 +4,8 @@ from unittest import IsolatedAsyncioTestCase, mock
 from app.schemas.forebet import ForebetMatch, ForebetPredictionResult, SportyBetEvent
 from app.services.sportybet import SportyBetUpcomingEventsResult
 from app.services import forebet_draw_diagnostics as diagnostics
+from fastapi.testclient import TestClient
+from app.main import app
 
 
 def match():
@@ -21,6 +23,17 @@ def many_events():
 
 
 class DiagnosticsTests(IsolatedAsyncioTestCase):
+    async def test_get_endpoint_reads_persisted_state_without_provider_calls(self):
+        stored = mock.Mock(days=[], active_count=0)
+        with mock.patch.object(diagnostics.forebet_draw_worker.engine, "get_active_window", return_value=stored), mock.patch.object(
+            diagnostics, "database_diagnostics", return_value={"reachable": True}
+        ), mock.patch.object(diagnostics, "fetch_forebet_page", side_effect=AssertionError("must not fetch Forebet")), mock.patch.object(
+            diagnostics, "get_upcoming_football_events", side_effect=AssertionError("must not fetch SportyBet")
+        ):
+            response = TestClient(app).get("/api/v1/forebet/draw-window/diagnostics")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["forebet"]["sources_attempted"], 0)
+
     async def test_successful_diagnostics_do_not_book_or_mutate(self):
         with mock.patch.object(diagnostics, "future_prediction_dates", return_value=[datetime(2026, 8, 22).date()]), mock.patch.object(diagnostics, "future_prediction_urls", return_value=["https://forebet.test/date"]), mock.patch.object(diagnostics, "database_diagnostics", return_value={"reachable": True, "daily_booking_table_available": True, "revision_table_available": True, "active_records": 0, "error": None}), mock.patch.object(diagnostics, "fetch_forebet_page", return_value="html"), mock.patch.object(diagnostics, "parse_forebet_html", return_value=[match()]), mock.patch.object(diagnostics, "get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(1, [event()])), mock.patch("app.services.sportybet._create_share_code", side_effect=AssertionError("must not book")), mock.patch("app.services.forebet_draw_store.ForebetDrawStore.promote", side_effect=AssertionError("must not write")):
             report = await diagnostics.run_forebet_draw_diagnostics()

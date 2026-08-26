@@ -13,7 +13,7 @@ from app.services.sportybet import parse_upcoming_events_page
 from app.services.sportybet import create_draw_booking
 from app.schemas.forebet_draw_window import DrawWindowRefreshRequest, DrawWindowResponse
 from app.services.forebet_draw_engine import forebet_draw_engine
-from app.services.forebet_draw_diagnostics import run_forebet_draw_diagnostics
+from app.services.forebet_draw_diagnostics import persisted_forebet_draw_diagnostics
 from app.schemas.forebet_ingestion import ForebetAcquisitionSnapshotRequest, SportyBetFixtureSnapshotRequest
 from app.services.forebet_ingestion import dry_run_snapshot, execute_snapshot
 import json
@@ -125,8 +125,8 @@ async def get_draw_window() -> DrawWindowResponse:
 
 @router.get("/draw-window/diagnostics")
 async def get_draw_window_diagnostics() -> dict:
-    """Run the provider/matching pipeline without booking or state mutation."""
-    return await run_forebet_draw_diagnostics()
+    """Return the latest persisted worker diagnostics without provider traffic."""
+    return persisted_forebet_draw_diagnostics()
 
 
 @router.post("/draw-window/refresh", response_model=DrawWindowResponse)

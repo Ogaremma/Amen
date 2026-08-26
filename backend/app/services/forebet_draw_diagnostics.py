@@ -143,3 +143,19 @@ async def run_forebet_draw_diagnostics() -> dict:
             report["booking_candidates"]["validation_errors"] += 1
     report["booking_candidates"]["dates_with_valid_candidates"] = len(valid_dates)
     return report
+
+
+def persisted_forebet_draw_diagnostics() -> dict:
+    """Return the latest worker-produced state without contacting providers."""
+    settings = get_settings()
+    response = forebet_draw_worker.engine.get_active_window()
+    days = response.days
+    errors = [message for day in days for message in day.diagnostics if "FAILURE" in message or "error" in day.status]
+    return {
+        "worker": {"configured": True, "running": forebet_draw_worker.running, "refresh_interval_seconds": settings.forebet_draw_refresh_interval_seconds},
+        "forebet": {"sources_attempted": len({url for day in days for url in day.source_urls}), "sources_succeeded": sum(day.acquisition.get("status") == "success" for day in days), "matches_parsed": sum(day.selection_count for day in days), "draw_matches": sum(day.selection_count for day in days), "acquisition_status": "failed" if errors else "success", "errors": errors},
+        "database": database_diagnostics(),
+        "worker_execution": {"last_started": forebet_draw_worker.last_started, "last_completed": forebet_draw_worker.last_completed, "last_failure": forebet_draw_worker.last_failure, "last_failure_stage": forebet_draw_worker.last_failure_stage},
+        "per_date": {day.prediction_date.isoformat(): {"fixtures": day.selection_count, "draws": day.selection_count, "diagnostics": day.diagnostics, "acquisition": day.acquisition} for day in days},
+        "selections": [], "sportybet": {"events_retrieved": 0, "football_events": 0, "total_num": None, "pages_fetched": 0, "error": None}, "matching": {}, "booking_candidates": {},
+    }
