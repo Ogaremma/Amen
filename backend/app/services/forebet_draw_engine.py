@@ -234,7 +234,14 @@ class ForebetDrawEngine:
 
     async def refresh_window(self, source_urls: list[str], start_datetime: datetime | None = None, end_datetime: datetime | None = None, *, now: datetime | None = None) -> DrawWindowResponse:
         async with self._lock:
-            html_pages = await asyncio.gather(*(fetch_forebet_page(url) for url in source_urls), return_exceptions=True)
+            # Fetch sequentially so a Cloudflare clearance established by the
+            # first browser fallback can be reused by later rolling dates.
+            html_pages = []
+            for url in source_urls:
+                try:
+                    html_pages.append(await fetch_forebet_page(url))
+                except Exception as exc:
+                    html_pages.append(exc)
             forebet_matches = []
             target_dates = prediction_dates_from_urls(source_urls)
             failed_dates: set[date] = set()

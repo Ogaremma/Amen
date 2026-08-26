@@ -44,6 +44,12 @@ services:
         value: "30"
       - key: FOREBET_DRAW_REFRESH_INTERVAL_SECONDS
         value: "900"
+      - key: FOREBET_DRAW_REFRESH_JITTER_SECONDS
+        value: "90"
+      - key: FOREBET_CHALLENGE_FAILURE_THRESHOLD
+        value: "3"
+      - key: FOREBET_CHALLENGE_COOLDOWN_SECONDS
+        value: "3600"
       - key: FOREBET_DRAW_PRUNE_INTERVAL_SECONDS
         value: "60"
       - key: FOREBET_DRAW_MISSING_EVENT_TIMEOUT_HOURS

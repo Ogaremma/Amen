@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from types import SimpleNamespace
 from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
@@ -164,6 +165,18 @@ def test_403_uses_browser_fallback():
     with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)), patch("app.services.forebet.fetch_forebet_page_browser", new=AsyncMock(return_value="<html><body>Forebet</body></html>")) as browser:
         assert asyncio.run(fetch_forebet_page(SOURCE_URL)) == "<html><body>Forebet</body></html>"
         browser.assert_awaited_once_with(SOURCE_URL)
+
+def test_captured_clearance_cookie_reused_without_browser_fallback():
+    async def run():
+        async with httpx.AsyncClient() as client:
+            async def get(url):
+                assert client.cookies.get("cf_clearance") == "captured-token"
+                return httpx.Response(200, text="<html><body>ok</body></html>", headers={"content-type": "text/html"}, request=httpx.Request("GET", url))
+            settings = SimpleNamespace(forebet_retries=0, forebet_retry_backoff=0, forebet_browser_fallback_enabled=True)
+            with patch("app.services.forebet.get_settings", return_value=settings), patch("app.services.forebet._active_clearance_cookies", return_value=[{"name":"cf_clearance","value":"captured-token","domain":"www.forebet.com","path":"/"}]), patch.object(client, "get", new=AsyncMock(side_effect=get)), patch("app.services.forebet.fetch_forebet_page_browser", new=AsyncMock()) as browser:
+                assert await fetch_forebet_page(SOURCE_URL, client=client) == "<html><body>ok</body></html>"
+                browser.assert_not_awaited()
+    asyncio.run(run())
 
 
 def test_browser_fallback_failure_remains_access_denied():

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, mock
 
 from app.schemas.forebet_draw_window import DrawWindowResponse
-from app.services.forebet_draw_worker import ForebetDrawRefreshWorker
+from app.services.forebet_draw_worker import ForebetDrawRefreshWorker, _jittered_refresh_delay
 
 
 class WorkerTests(IsolatedAsyncioTestCase):
@@ -53,3 +53,43 @@ class WorkerTests(IsolatedAsyncioTestCase):
             first = ForebetDrawRefreshWorker(engine); await first.start(); await first.stop()
             second = ForebetDrawRefreshWorker(engine); await second.start(); await second.stop()
         self.assertEqual(engine.refresh_window.await_count, 2)
+
+    def test_jitter_bounds_across_many_samples(self):
+        samples = [_jittered_refresh_delay(120.0, 18.0) for _ in range(2000)]
+        self.assertTrue(all(102.0 <= value <= 138.0 for value in samples))
+        self.assertLess(min(samples), 120.0)
+        self.assertGreater(max(samples), 120.0)
+
+    async def test_counter_threshold_cooldown_and_success_reset(self):
+        blocked = SimpleNamespace(days=[SimpleNamespace(diagnostics=["PROVIDER_FAILURE: ForebetAccessDeniedError"])], active_count=0)
+        healthy = SimpleNamespace(days=[], active_count=0)
+        engine = mock.Mock()
+        engine.get_active_window.return_value = DrawWindowResponse(days=[], active_count=0)
+        engine.refresh_window = mock.AsyncMock(side_effect=[blocked, blocked, healthy])
+        worker = ForebetDrawRefreshWorker(engine)
+        settings = SimpleNamespace(
+            forebet_draw_refresh_interval_seconds=20.0,
+            forebet_challenge_failure_threshold=2,
+            forebet_challenge_cooldown_seconds=45.0,
+            forebet_draw_refresh_jitter_seconds=0.0,
+        )
+        observations = []
+
+        async def advance(awaitable, timeout):
+            awaitable.close()
+            observations.append((worker.consecutive_forebet_failures, timeout, worker.forebet_cooldown_until))
+            if len(observations) == 3:
+                worker._stop.set()
+                return True
+            raise asyncio.TimeoutError
+
+        with mock.patch("app.services.forebet_draw_worker.get_settings", return_value=settings), mock.patch(
+            "app.services.forebet_draw_worker.future_prediction_urls", return_value=["https://forebet.test/a"]
+        ), mock.patch("app.services.forebet_draw_worker.asyncio.wait_for", side_effect=advance):
+            await worker._run()
+
+        self.assertEqual([item[0] for item in observations], [1, 2, 0])
+        self.assertEqual([item[1] for item in observations], [20.0, 45.0, 20.0])
+        self.assertIsNone(observations[0][2])
+        self.assertIsNotNone(observations[1][2])
+        self.assertIsNone(observations[2][2])

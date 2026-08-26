@@ -4,6 +4,7 @@ import asyncio
 import logging
 import socket
 import uuid
+import random
 from datetime import datetime, timezone
 
 from app.config.settings import get_settings
@@ -11,6 +12,10 @@ from app.services.forebet_draw_engine import ForebetDrawEngine, forebet_draw_eng
 from app.services.forebet_dates import future_prediction_urls
 
 logger = logging.getLogger("amen.forebet_draw_worker")
+
+def _jittered_refresh_delay(interval: float, jitter: float) -> float:
+    effective_jitter = min(jitter, interval * 0.25)
+    return max(0.001, interval + random.uniform(-effective_jitter, effective_jitter))
 
 
 class ForebetDrawRefreshWorker:
@@ -24,6 +29,8 @@ class ForebetDrawRefreshWorker:
         self.last_failure: str | None = None
         self.last_failure_stage: str | None = None
         self.last_prune_completed: datetime | None = None
+        self.consecutive_forebet_failures = 0
+        self.forebet_cooldown_until: datetime | None = None
         self.owner_id = f"{socket.gethostname()}:{uuid.uuid4()}"
 
     @property
@@ -74,8 +81,19 @@ class ForebetDrawRefreshWorker:
                 before = {day.prediction_date: day.booking_code for day in self.engine.get_active_window().days}
                 response = await self.engine.refresh_window(source_urls)
                 self.last_completed = datetime.now(timezone.utc)
-                self.last_failure = None
-                self.last_failure_stage = None
+                provider_failed = any(
+                    any("PROVIDER_FAILURE: ForebetAccessDeniedError" in message for message in day.diagnostics)
+                    for day in response.days
+                )
+                if provider_failed:
+                    self.consecutive_forebet_failures += 1
+                    self.last_failure = "Forebet Cloudflare challenge blocked the rolling refresh"
+                    self.last_failure_stage = "forebet_acquisition"
+                else:
+                    self.consecutive_forebet_failures = 0
+                    self.forebet_cooldown_until = None
+                    self.last_failure = None
+                    self.last_failure_stage = None
                 after = {day.prediction_date: day.booking_code for day in response.days}
                 created = [code for day, code in after.items() if day not in before]
                 reused = [code for day, code in after.items() if before.get(day) == code]
@@ -90,8 +108,16 @@ class ForebetDrawRefreshWorker:
             finally:
                 if store and hasattr(store, "release_job_lock"):
                     store.release_job_lock("rolling-draw-refresh", self.owner_id)
+            threshold = getattr(settings, "forebet_challenge_failure_threshold", 3)
+            if self.consecutive_forebet_failures >= threshold:
+                delay = getattr(settings, "forebet_challenge_cooldown_seconds", 3600.0)
+                self.forebet_cooldown_until = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() + delay, timezone.utc)
+                logger.warning("forebet_cooldown failures=%s delay_seconds=%s", self.consecutive_forebet_failures, delay)
+            else:
+                jitter = getattr(settings, "forebet_draw_refresh_jitter_seconds", 90.0)
+                delay = _jittered_refresh_delay(interval, jitter)
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=interval)
+                await asyncio.wait_for(self._stop.wait(), timeout=delay)
             except asyncio.TimeoutError:
                 continue
 

@@ -70,5 +70,7 @@ async def readiness():
             "last_failure": forebet_draw_worker.last_failure,
             "last_failure_stage": forebet_draw_worker.last_failure_stage,
             "last_prune_completed": forebet_draw_worker.last_prune_completed,
+            "consecutive_forebet_failures": forebet_draw_worker.consecutive_forebet_failures,
+            "forebet_cooldown_until": forebet_draw_worker.forebet_cooldown_until,
         },
     }

@@ -4,6 +4,7 @@ import re
 import asyncio
 import logging
 import time
+import threading
 from datetime import date, datetime
 from typing import Iterable
 from urllib.parse import urljoin, urlparse
@@ -35,6 +36,21 @@ class ForebetBrowserChallengeError(ForebetAcquisitionError):
 
 
 _browser_semaphore = asyncio.Semaphore(1)
+_clearance_lock = threading.Lock()
+_clearance_cookies: list[dict] = []
+
+
+def _active_clearance_cookies() -> list[dict]:
+    now = time.time()
+    with _clearance_lock:
+        return [dict(cookie) for cookie in _clearance_cookies if not cookie.get("expires") or cookie["expires"] > now]
+
+
+def _remember_clearance_cookies(cookies: list[dict]) -> None:
+    retained = [cookie for cookie in cookies if cookie.get("name") in {"cf_clearance", "__cf_bm"}]
+    if retained:
+        with _clearance_lock:
+            _clearance_cookies[:] = retained
 
 
 def _redirect_count(request) -> int:
@@ -263,6 +279,9 @@ def _fetch_forebet_page_browser_sync(url: str) -> str:
                 user_agent=settings.forebet_user_agent,
                 locale="en-US",
             )
+            prior_cookies = _active_clearance_cookies()
+            if prior_cookies:
+                context.add_cookies(prior_cookies)
 
             page = context.new_page()
 
@@ -321,6 +340,7 @@ def _fetch_forebet_page_browser_sync(url: str) -> str:
                 page.url,
                 expected_host or "",
             )
+            _remember_clearance_cookies(context.cookies())
 
             logger.info(
                 "browser_fallback_success host=%s transport=sync_thread",
@@ -381,6 +401,11 @@ async def fetch_forebet_page(url: str, *, client: httpx.AsyncClient | None = Non
     try:
         for attempt in range(settings.forebet_retries + 1):
             try:
+                for cookie in _active_clearance_cookies():
+                    kwargs = {"path": cookie.get("path", "/")}
+                    if cookie.get("domain"):
+                        kwargs["domain"] = cookie["domain"]
+                    http_client.cookies.set(cookie["name"], cookie["value"], **kwargs)
                 response = await http_client.get(url)
                 if response.status_code == 403:
                     logger.warning("http_403 host=%s", response.request.url.host)
