@@ -286,6 +286,11 @@ def _validate_and_log_browser_page(
     _validate_browser_forebet_html(html, final_url, expected_host)
 
 
+def _wait_for_browser_content(page, timeout_ms: int) -> None:
+    """Wait for an actual Forebet fixture row, not merely an interstitial body."""
+    page.wait_for_selector(".schema > .rcnt", timeout=max(timeout_ms, 60000))
+
+
 def _fetch_forebet_page_browser_sync(url: str) -> str:
     """Acquire one Forebet page using synchronous Playwright.
 
@@ -340,10 +345,7 @@ def _fetch_forebet_page_browser_sync(url: str) -> str:
             )
 
             try:
-                page.wait_for_selector(
-                    ".schema, body",
-                    timeout=timeout_ms,
-                )
+                _wait_for_browser_content(page, timeout_ms)
             except PlaywrightTimeoutError:
                 pass
 

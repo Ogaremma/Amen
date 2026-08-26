@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -234,6 +234,20 @@ def test_browser_validation_logs_valid_page_details(caplog):
     assert "title='Football Predictions | Forebet'" in message
     assert "final_host=www.forebet.com" in message
     assert "elapsed_ms=842 schema_count=1 fixture_rows=1" in message
+
+
+def test_browser_wait_uses_real_fixture_selector_and_generous_timeout():
+    from app.services.forebet import _wait_for_browser_content
+    page = SimpleNamespace(wait_for_selector=Mock())
+    _wait_for_browser_content(page, 30000)
+    page.wait_for_selector.assert_called_once_with(".schema > .rcnt", timeout=60000)
+
+
+def test_browser_wait_propagates_timeout_for_interstitial():
+    from app.services.forebet import _wait_for_browser_content
+    page = SimpleNamespace(wait_for_selector=Mock(side_effect=Exception("timeout")))
+    with pytest.raises(Exception, match="timeout"):
+        _wait_for_browser_content(page, 30000)
 
 
 def test_malformed_response_is_rejected():
