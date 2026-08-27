@@ -240,7 +240,7 @@ def test_browser_wait_uses_real_fixture_selector_and_generous_timeout():
     from app.services.forebet import _wait_for_browser_content
     page = SimpleNamespace(wait_for_selector=Mock())
     _wait_for_browser_content(page, 30000)
-    page.wait_for_selector.assert_called_once_with(".schema > .rcnt", timeout=60000)
+    page.wait_for_selector.assert_called_once_with(".schema > .rcnt", timeout=20000)
 
 
 def test_browser_wait_propagates_timeout_for_interstitial():
@@ -248,6 +248,17 @@ def test_browser_wait_propagates_timeout_for_interstitial():
     page = SimpleNamespace(wait_for_selector=Mock(side_effect=Exception("timeout")))
     with pytest.raises(Exception, match="timeout"):
         _wait_for_browser_content(page, 30000)
+
+
+def test_browser_cleanup_closes_process_even_if_context_close_fails():
+    from app.services.forebet import _close_browser_resources
+    context = Mock()
+    context.close.side_effect = RuntimeError("context cleanup failed")
+    browser = Mock()
+    with pytest.raises(RuntimeError, match="context cleanup failed"):
+        _close_browser_resources(context, browser)
+    context.close.assert_called_once_with()
+    browser.close.assert_called_once_with()
 
 
 def test_malformed_response_is_rejected():

@@ -18,6 +18,11 @@ def _jittered_refresh_delay(interval: float, jitter: float) -> float:
     return max(0.001, interval + random.uniform(-effective_jitter, effective_jitter))
 
 
+def _challenge_cooldown_delay(failures: int, threshold: int, base: float, cap: float) -> float:
+    exponent = max(0, failures - threshold)
+    return min(cap, base * (2 ** exponent))
+
+
 class ForebetDrawRefreshWorker:
     def __init__(self, engine: ForebetDrawEngine = forebet_draw_engine) -> None:
         self.engine = engine
@@ -110,7 +115,9 @@ class ForebetDrawRefreshWorker:
                     store.release_job_lock("rolling-draw-refresh", self.owner_id)
             threshold = getattr(settings, "forebet_challenge_failure_threshold", 3)
             if self.consecutive_forebet_failures >= threshold:
-                delay = getattr(settings, "forebet_challenge_cooldown_seconds", 3600.0)
+                base_delay = getattr(settings, "forebet_challenge_cooldown_seconds", 3600.0)
+                max_delay = getattr(settings, "forebet_challenge_cooldown_max_seconds", 21600.0)
+                delay = _challenge_cooldown_delay(self.consecutive_forebet_failures, threshold, base_delay, max_delay)
                 self.forebet_cooldown_until = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() + delay, timezone.utc)
                 logger.warning("forebet_cooldown failures=%s delay_seconds=%s", self.consecutive_forebet_failures, delay)
             else:

@@ -41,7 +41,7 @@ services:
       - key: FOREBET_RETRY_BACKOFF
         value: "0.5"
       - key: FOREBET_BROWSER_TIMEOUT
-        value: "30"
+        value: "20"
       - key: FOREBET_DRAW_REFRESH_INTERVAL_SECONDS
         value: "900"
       - key: FOREBET_DRAW_REFRESH_JITTER_SECONDS
@@ -50,6 +50,8 @@ services:
         value: "3"
       - key: FOREBET_CHALLENGE_COOLDOWN_SECONDS
         value: "3600"
+      - key: FOREBET_CHALLENGE_COOLDOWN_MAX_SECONDS
+        value: "21600"
       - key: FOREBET_DRAW_PRUNE_INTERVAL_SECONDS
         value: "60"
       - key: FOREBET_DRAW_MISSING_EVENT_TIMEOUT_HOURS

@@ -288,7 +288,15 @@ def _validate_and_log_browser_page(
 
 def _wait_for_browser_content(page, timeout_ms: int) -> None:
     """Wait for an actual Forebet fixture row, not merely an interstitial body."""
-    page.wait_for_selector(".schema > .rcnt", timeout=max(timeout_ms, 60000))
+    page.wait_for_selector(".schema > .rcnt", timeout=min(timeout_ms, 20000))
+
+
+def _close_browser_resources(context, browser) -> None:
+    try:
+        if context is not None:
+            context.close()
+    finally:
+        browser.close()
 
 
 def _fetch_forebet_page_browser_sync(url: str) -> str:
@@ -325,6 +333,7 @@ def _fetch_forebet_page_browser_sync(url: str) -> str:
             ],
         )
 
+        context = None
         try:
             context = browser.new_context(
                 user_agent=settings.forebet_user_agent,
@@ -388,7 +397,7 @@ def _fetch_forebet_page_browser_sync(url: str) -> str:
             return html
 
         finally:
-            browser.close()
+            _close_browser_resources(context, browser)
 
 
 async def fetch_forebet_page_browser(url: str) -> str:

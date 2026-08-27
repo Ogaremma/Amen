@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, mock
 
 from app.schemas.forebet_draw_window import DrawWindowResponse
-from app.services.forebet_draw_worker import ForebetDrawRefreshWorker, _jittered_refresh_delay
+from app.services.forebet_draw_worker import ForebetDrawRefreshWorker, _challenge_cooldown_delay, _jittered_refresh_delay
 
 
 class WorkerTests(IsolatedAsyncioTestCase):
@@ -59,6 +59,10 @@ class WorkerTests(IsolatedAsyncioTestCase):
         self.assertTrue(all(102.0 <= value <= 138.0 for value in samples))
         self.assertLess(min(samples), 120.0)
         self.assertGreater(max(samples), 120.0)
+
+    def test_challenge_cooldown_grows_and_respects_cap(self):
+        delays = [_challenge_cooldown_delay(failures, 3, 3600.0, 21600.0) for failures in range(3, 9)]
+        self.assertEqual(delays, [3600.0, 7200.0, 14400.0, 21600.0, 21600.0, 21600.0])
 
     async def test_counter_threshold_cooldown_and_success_reset(self):
         blocked = SimpleNamespace(days=[SimpleNamespace(diagnostics=["PROVIDER_FAILURE: ForebetAccessDeniedError"])], active_count=0)
