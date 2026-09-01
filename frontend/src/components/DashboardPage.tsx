@@ -243,6 +243,19 @@ export function DashboardPage() {
     })
   }
 
+  const toggleDateSelections = (selections: BookingSelection[]) => {
+    if (busy || selections.length === 0) return
+    setSelectedEventIds((current) => {
+      const next = new Set(current)
+      if (selections.every((selection) => current.has(selection.event_id))) {
+        selections.forEach((selection) => next.delete(selection.event_id))
+      } else {
+        selections.forEach((selection) => next.add(selection.event_id))
+      }
+      return next
+    })
+  }
+
   const removeSelected = async () => {
     if (!booking || selectedCount === 0 || busy) return
     setConfirmOpen(false)
@@ -298,7 +311,18 @@ export function DashboardPage() {
       <div className="flex items-center gap-2 px-1">
         <CalendarDays className="h-4 w-4 text-accent" />
         <h2 className="date-section-heading text-xs font-bold uppercase tracking-[0.18em] text-yellow-300">{formatDateHeader(group.date)}</h2>
-        <span className="ml-auto text-[11px] text-slate-500">{group.selections.length} game{group.selections.length === 1 ? '' : 's'}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[11px] text-slate-500">{group.selections.length} game{group.selections.length === 1 ? '' : 's'}</span>
+          <button
+            type="button"
+            onClick={() => toggleDateSelections(group.selections)}
+            disabled={busy || group.selections.length === 0}
+            aria-label={`${group.selections.every((selection) => selectedEventIds.has(selection.event_id)) ? 'Deselect' : 'Select'} all games on ${formatDateHeader(group.date)}`}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-50 ${group.selections.every((selection) => selectedEventIds.has(selection.event_id)) ? 'border-red-400/40 bg-red-500/15 text-red-200' : 'border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]'}`}
+          >
+            <CheckCheck className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="space-y-2">
         {group.selections.map((selection) => {
@@ -307,7 +331,23 @@ export function DashboardPage() {
           const result = RESULT[selection.result_status]
           const ResultIcon = result.icon
           return (
-            <Card key={selection.event_id} data-selected={selected ? 'true' : 'false'} className={`relative p-3 pb-5 pr-12 transition ${selected ? 'border-red-400/60 bg-red-500/10' : ''}`}>
+            <Card
+              key={selection.event_id}
+              data-selected={selected ? 'true' : 'false'}
+              role="button"
+              tabIndex={busy ? -1 : 0}
+              aria-pressed={selected}
+              aria-disabled={busy}
+              aria-label={`Toggle selection for ${selection.home} vs ${selection.away}`}
+              onClick={() => toggleSelection(selection.event_id)}
+              onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  toggleSelection(selection.event_id)
+                }
+              }}
+              className={`relative cursor-pointer p-3 pb-5 pr-12 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${selected ? 'border-red-400/60 bg-red-500/10' : ''}`}
+            >
               <div className="min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-accent"><Clock3 className="h-3.5 w-3.5" />{formatTime12(selection.local_kickoff_time)}</span>
@@ -335,19 +375,11 @@ export function DashboardPage() {
                   </p>
                 </div>
               </div>
-              <label className="absolute bottom-1 right-1 flex h-10 w-10 cursor-pointer items-center justify-center" title={`Select ${selection.home} vs ${selection.away}`}>
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  disabled={busy}
-                  onChange={() => toggleSelection(selection.event_id)}
-                  aria-label={`Select ${selection.home} vs ${selection.away}`}
-                  className="peer sr-only"
-                />
-                <span data-testid={`selection-control-${selection.event_id}`} className="flex h-4 w-4 items-center justify-center rounded border border-slate-500 bg-transparent text-transparent transition peer-checked:border-red-500 peer-checked:bg-red-500 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-red-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
+              <span className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center" title={`${selected ? 'Deselect' : 'Select'} ${selection.home} vs ${selection.away}`} aria-hidden="true">
+                <span data-testid={`selection-control-${selection.event_id}`} className={`flex h-4 w-4 items-center justify-center rounded border transition ${selected ? 'border-red-500 bg-red-500 text-white' : 'border-slate-500 bg-transparent text-transparent'}`}>
                   <Check className="h-3.5 w-3.5" strokeWidth={3} />
                 </span>
-              </label>
+              </span>
             </Card>
           )
         })}

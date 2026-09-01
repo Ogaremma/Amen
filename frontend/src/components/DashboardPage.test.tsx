@@ -42,6 +42,14 @@ async function loadTicket(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole('button', { name: 'Restore original ticket' })
 }
 
+const gameCard = (home: string, away: string) => screen.getByRole('button', {
+  name: `Toggle selection for ${home} vs ${away}`,
+})
+
+const expectSelected = (home: string, away: string, selected: boolean) => {
+  expect(gameCard(home, away)).toHaveAttribute('aria-pressed', String(selected))
+}
+
 describe('DashboardPage Phase 3 ticket flow', () => {
   let clipboardWrite: ReturnType<typeof vi.fn>
 
@@ -132,16 +140,16 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     const user = userEvent.setup()
     render(<DashboardPage />)
     await loadTicket(user)
-    await user.click(screen.getByLabelText('Select Team A vs Team B'))
+    await user.click(gameCard('Team A', 'Team B'))
     await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
     expect(screen.getByRole('heading', { name: 'Ended Games' })).toBeInTheDocument()
     expect(screen.getByText(/Team E.*Team F/)).toBeInTheDocument()
     expect(screen.queryByText(/Team A.*Team B/)).not.toBeInTheDocument()
     expect(screen.getAllByText('1 selected')).toHaveLength(2)
-    await user.click(screen.getByLabelText('Select Team E vs Team F'))
+    await user.click(gameCard('Team E', 'Team F'))
     expect(screen.getAllByText('2 selected')).toHaveLength(2)
     await user.click(screen.getByRole('button', { name: 'Back to ticket details' }))
-    expect(screen.getByLabelText('Select Team A vs Team B')).toBeChecked()
+    expectSelected('Team A', 'Team B', true)
     expect(screen.getAllByText('2 selected')).toHaveLength(2)
   })
 
@@ -151,23 +159,89 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     await loadTicket(user)
 
     await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
-    await user.click(screen.getByLabelText('Select Team E vs Team F'))
+    await user.click(gameCard('Team E', 'Team F'))
     await user.click(screen.getByRole('button', { name: 'Back to ticket details' }))
 
     const selectAll = screen.getByRole('button', { name: 'Select all live and upcoming games' })
     await user.click(selectAll)
-    expect(screen.getByLabelText('Select Team A vs Team B')).toBeChecked()
-    expect(screen.getByLabelText('Select Team C vs Team D')).toBeChecked()
+    expectSelected('Team A', 'Team B', true)
+    expectSelected('Team C', 'Team D', true)
     expect(screen.getByRole('button', { name: 'Deselect all live and upcoming games' })).toBeInTheDocument()
     expect(screen.getAllByText('3 selected')).toHaveLength(2)
 
     await user.click(screen.getByRole('button', { name: 'Deselect all live and upcoming games' }))
-    expect(screen.getByLabelText('Select Team A vs Team B')).not.toBeChecked()
-    expect(screen.getByLabelText('Select Team C vs Team D')).not.toBeChecked()
+    expectSelected('Team A', 'Team B', false)
+    expectSelected('Team C', 'Team D', false)
     expect(screen.getAllByText('1 selected')).toHaveLength(2)
 
     await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
-    expect(screen.getByLabelText('Select Team E vs Team F')).toBeChecked()
+    expectSelected('Team E', 'Team F', true)
+  })
+
+  it('toggles a game by clicking the card body and supports Enter and Space', async () => {
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    const card = screen.getByRole('button', { name: 'Toggle selection for Team A vs Team B' })
+    await user.click(screen.getByText(/Team A.*Team B/))
+    expectSelected('Team A', 'Team B', true)
+
+    card.focus()
+    await user.keyboard('{Enter}')
+    expectSelected('Team A', 'Team B', false)
+    await user.keyboard(' ')
+    expectSelected('Team A', 'Team B', true)
+  })
+
+  it('toggles once when the existing corner selection icon is clicked', async () => {
+    const user = userEvent.setup()
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    await user.click(screen.getByTestId('selection-control-A'))
+    expectSelected('Team A', 'Team B', true)
+    expect(screen.getAllByText('1 selected')).toHaveLength(2)
+  })
+
+  it('selects and deselects only the games in one date group', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.fetchBookingByCode).mockResolvedValue({
+      ...original,
+      selections: original.selections.map((selection) => selection.event_id === 'B'
+        ? { ...selection, local_kickoff_date: '2026-08-14' }
+        : selection),
+    })
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    await user.click(screen.getByRole('button', { name: 'Select all games on AUGUST 13, 2026' }))
+    expectSelected('Team A', 'Team B', true)
+    expectSelected('Team C', 'Team D', false)
+
+    await user.click(screen.getByRole('button', { name: 'Deselect all games on AUGUST 13, 2026' }))
+    expectSelected('Team A', 'Team B', false)
+    expectSelected('Team C', 'Team D', false)
+  })
+
+  it('completes a partially selected date without affecting another date', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.fetchBookingByCode).mockResolvedValue({
+      ...original,
+      selections: [
+        original.selections[0],
+        { ...original.selections[1], local_kickoff_date: '2026-08-13' },
+        { ...original.selections[2], event_id: 'D', id: 'D', home: 'Team G', away: 'Team H', game_status: 'upcoming', result_status: 'pending', local_kickoff_date: '2026-08-14' },
+      ],
+    })
+    render(<DashboardPage />)
+    await loadTicket(user)
+
+    await user.click(gameCard('Team A', 'Team B'))
+    await user.click(screen.getByRole('button', { name: 'Select all games on AUGUST 13, 2026' }))
+    expectSelected('Team A', 'Team B', true)
+    expectSelected('Team C', 'Team D', true)
+    expectSelected('Team G', 'Team H', false)
   })
 
   it('select all completes a partial selection and removal remains one batch request', async () => {
@@ -176,10 +250,10 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     render(<DashboardPage />)
     await loadTicket(user)
 
-    await user.click(screen.getByLabelText('Select Team A vs Team B'))
+    await user.click(gameCard('Team A', 'Team B'))
     await user.click(screen.getByRole('button', { name: 'Select all live and upcoming games' }))
-    expect(screen.getByLabelText('Select Team A vs Team B')).toBeChecked()
-    expect(screen.getByLabelText('Select Team C vs Team D')).toBeChecked()
+    expectSelected('Team A', 'Team B', true)
+    expectSelected('Team C', 'Team D', true)
 
     await user.click(screen.getAllByRole('button', { name: /Remove Selected \((top|bottom)\)/ })[0])
     await user.click(screen.getByRole('button', { name: 'Remove Selected' }))
@@ -193,14 +267,16 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     render(<DashboardPage />)
     await loadTicket(user)
 
-    const upcomingCheckbox = screen.getByLabelText('Select Team A vs Team B')
+    const upcomingCard = gameCard('Team A', 'Team B')
     const control = screen.getByTestId('selection-control-A')
-    expect(control).toHaveClass('h-4', 'w-4', 'bg-transparent', 'peer-checked:bg-red-500')
+    expect(control).toHaveClass('h-4', 'w-4', 'bg-transparent', 'border-slate-500')
     expect(screen.getByText('Live')).toHaveClass('text-emerald-300')
     expect(screen.getByText('Upcoming')).toHaveClass('text-sky-200')
 
-    await user.click(upcomingCheckbox)
-    expect(upcomingCheckbox.closest('[data-selected="true"]')).toHaveClass('border-red-400/60', 'bg-red-500/10')
+    await user.click(upcomingCard)
+    expect(upcomingCard).toHaveAttribute('data-selected', 'true')
+    expect(upcomingCard).toHaveClass('border-red-400/60', 'bg-red-500/10')
+    expect(control).toHaveClass('border-red-500', 'bg-red-500', 'text-white')
 
     await user.click(screen.getByRole('button', { name: 'View 1 ended games' }))
     expect(screen.getByText('Ended')).toHaveClass('text-red-300')
@@ -225,15 +301,15 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     await loadTicket(user)
     const removeButtons = screen.getAllByRole('button', { name: /Remove Selected \((top|bottom)\)/ })
     expect(removeButtons.every((button) => button.hasAttribute('disabled'))).toBe(true)
-    await user.click(screen.getByLabelText('Select Team A vs Team B'))
-    await user.click(screen.getByLabelText('Select Team C vs Team D'))
+    await user.click(gameCard('Team A', 'Team B'))
+    await user.click(gameCard('Team C', 'Team D'))
     expect(screen.getAllByText('2 selected')).toHaveLength(2)
     await user.click(removeButtons[0])
     await user.click(screen.getByRole('button', { name: 'Remove Selected' }))
     await screen.findByText('QRZG53')
     expect(api.removeSelectedGames).toHaveBeenCalledTimes(1)
     expect(api.removeSelectedGames).toHaveBeenCalledWith('HW7UDH', expect.arrayContaining(['A', 'B']))
-    expect(screen.getByLabelText('Select Team A vs Team B')).not.toBeChecked()
+    expectSelected('Team A', 'Team B', false)
   })
 
   it('disables controls while rebooking and keeps current ticket on failure', async () => {
@@ -242,15 +318,15 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     vi.mocked(api.removeSelectedGames).mockImplementation(() => new Promise((_, reject) => { rejectRequest = reject }))
     render(<DashboardPage />)
     await loadTicket(user)
-    await user.click(screen.getByLabelText('Select Team A vs Team B'))
+    await user.click(gameCard('Team A', 'Team B'))
     await user.click(screen.getAllByRole('button', { name: /Remove Selected \((top|bottom)\)/ })[0])
     await user.click(screen.getByRole('button', { name: 'Remove Selected' }))
     expect(screen.getByText('SportyBet is generating the updated ticket…')).toBeInTheDocument()
-    expect(screen.getByLabelText('Select Team A vs Team B')).toBeDisabled()
+    expect(gameCard('Team A', 'Team B')).toHaveAttribute('aria-disabled', 'true')
     rejectRequest(new Error('SportyBet failed'))
     await screen.findByText(/SportyBet failed.*current ticket is unchanged/i)
     expect(screen.getByText('HW7UDH')).toBeInTheDocument()
-    expect(screen.getByLabelText('Select Team A vs Team B')).toBeChecked()
+    expectSelected('Team A', 'Team B', true)
   })
 
   it('refreshes the original code after rebooking and resets selections', async () => {
@@ -258,7 +334,7 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     vi.mocked(api.removeSelectedGames).mockResolvedValue(updated)
     render(<DashboardPage />)
     await loadTicket(user)
-    await user.click(screen.getByLabelText('Select Team C vs Team D'))
+    await user.click(gameCard('Team C', 'Team D'))
     await user.click(screen.getAllByRole('button', { name: /Remove Selected \((top|bottom)\)/ })[0])
     await user.click(screen.getByRole('button', { name: 'Remove Selected' }))
     await screen.findByText('QRZG53')
@@ -267,7 +343,7 @@ describe('DashboardPage Phase 3 ticket flow', () => {
     await screen.findByText('Original ticket restored.')
     expect(api.fetchBookingByCode).toHaveBeenLastCalledWith('HW7UDH')
     expect(screen.getByText('HW7UDH')).toBeInTheDocument()
-    expect(screen.getByLabelText('Select Team A vs Team B')).not.toBeChecked()
+    expectSelected('Team A', 'Team B', false)
   })
 
   it('shows loading ticket state', async () => {
