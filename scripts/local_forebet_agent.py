@@ -1,11 +1,11 @@
 """Acquire Forebet snapshots with the shared browser fallback and submit trusted raw HTML."""
-import argparse, asyncio, json, os
+import argparse, json, os
 from pathlib import Path
 import httpx
 from app.services.forebet import _fetch_forebet_page_browser_sync, parse_forebet_html
 from app.services.forebet_dates import future_prediction_dates, future_prediction_urls
 
-async def main():
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", default=os.getenv("AMEN_BACKEND_URL"), required=False)
     parser.add_argument("--token", default=os.getenv("FOREBET_INGESTION_TOKEN"), required=False)
@@ -25,10 +25,10 @@ async def main():
         print(json.dumps({"date": prediction_date.isoformat(), "matches": len(matches), "draws": sum(m.predicted_result.value == "DRAW" for m in matches)}))
     if args.no_submit:
         return
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(f"{args.backend.rstrip('/')}/api/v1/forebet/acquisition-snapshots", headers={"Authorization": f"Bearer {args.token}"}, json={"snapshots": snapshots, "dry_run": True})
+    with httpx.Client(timeout=120) as client:
+        response = client.post(f"{args.backend.rstrip('/')}/api/v1/forebet/acquisition-snapshots", headers={"Authorization": f"Bearer {args.token}"}, json={"snapshots": snapshots, "dry_run": True})
         response.raise_for_status()
         print(json.dumps(response.json(), indent=2, default=str))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
