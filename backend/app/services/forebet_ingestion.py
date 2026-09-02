@@ -68,10 +68,11 @@ async def process_snapshot(
     rolling_dates = future_prediction_dates()
     allowed_dates = set(rolling_dates)
     trusted_mode = any(snapshot.raw_html is not None for snapshot in request.snapshots)
-    if trusted_mode and execute_booking:
-        raise ValueError(
-            "trusted snapshot processing is paper-only; real booking is disabled"
-        )
+    if trusted_mode and execute_booking and not (
+        settings.forebet_draw_booking_enabled is True
+        and settings.forebet_real_booking_authorized is True
+    ):
+        raise ValueError("trusted snapshot real booking requires both booking flags")
     supplied_dates = [snapshot.prediction_date for snapshot in request.snapshots]
     if trusted_mode and (
         len(request.snapshots) != 3 or supplied_dates != rolling_dates
@@ -234,6 +235,12 @@ async def process_snapshot(
             [snapshot.source_url for snapshot in normalized], matches, upcoming.events
         )
         report["paper_window"] = window.model_dump(mode="json")
+        for snapshot in normalized:
+            forebet_draw_store.record_acquisition(
+                snapshot.prediction_date,
+                "success",
+                {"source_url": snapshot.source_url, "ingestion": "trusted_snapshot"},
+            )
     if execute_booking:
         grouped = defaultdict(list)
         for result in results:

@@ -68,6 +68,23 @@ class EngineTests(IsolatedAsyncioTestCase):
         events = [ev(20, "stray"), ev(21, "a"), ev(22, "b"), ev(23, "c"), ev(24, "next")]
         result = await self.paper_refresh(matches, events)
         self.assertEqual([day.prediction_date.day for day in result.days], [21, 22, 23])
+
+    async def test_external_snapshot_survives_worker_fetch_failure(self):
+        day = date(2026, 8, 21)
+        match = self.engine._window_match(
+            FixtureMatchResult(forebet_match=fm(21, "external"), status=FixtureMatchStatus.MATCHED_EXACT, sportybet_event=ev(21, "external"))
+        )
+        self.store.promote(day, "PAPER-EXTERNAL", [match], [f"https://forebet.test/{day}"], [], status="active")
+        self.store.record_acquisition(day, "success", {"ingestion": "trusted_snapshot"})
+        settings = mock.Mock(forebet_draw_booking_enabled=False, forebet_draw_paper_booking_enabled=True, sportybet_acquisition_ttl_seconds=300)
+        with mock.patch("app.services.forebet_draw_engine.get_settings", return_value=settings), \
+             mock.patch("app.services.forebet_draw_engine.fetch_forebet_page", side_effect=RuntimeError("Render provider blocked")), \
+             mock.patch("app.services.forebet_draw_engine.get_upcoming_football_events", return_value=SportyBetUpcomingEventsResult(0, [])):
+            result = await self.engine.refresh_window(TARGET_URLS)
+        persisted = next(item for item in result.days if item.prediction_date == day)
+        self.assertEqual(persisted.booking_code, "PAPER-EXTERNAL")
+        self.assertEqual(persisted.status, "active")
+        self.assertIsNotNone(persisted.acquisition["last_success_at"])
         self.assertNotIn("stray", [match.event_id for day in result.days for match in day.matches])
         self.assertNotIn("next", [match.event_id for day in result.days for match in day.matches])
 

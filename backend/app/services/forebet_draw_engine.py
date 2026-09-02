@@ -267,15 +267,18 @@ class ForebetDrawEngine:
                 reason = "SPORTYBET_INCOMPLETE" if not sportybet.complete else "SPORTYBET_STALE"
                 message = f"{reason}: expected={sportybet.total_num} retrieved={sportybet.retrieved_num} pages={sportybet.pages_fetched}"
                 for day in target_dates:
-                    self.store.record_acquisition(day, "error", provider_diagnostics, error_reason=message)
-                    self.store.promote(day, None, [], source_urls, [message], status="error")
+                    existing = {item.prediction_date: item for item in self.store.list_active(target_dates)}.get(day)
+                    state = self.store.get_acquisition_state(day)
+                    if not (existing and state.get("last_success_at")):
+                        self.store.record_acquisition(day, "error", provider_diagnostics, error_reason=message)
+                        self.store.promote(day, None, [], source_urls, [message], status="error")
                 self.store.unavailable_compilation(target_dates, status="error", diagnostics=[message])
                 self.store.complete_not_in(set(target_dates))
                 return self.get_active_window(now=now, target_dates=target_dates)
             # A real-booking refresh performs its own identity-aware replacement
             # below.  Running the local paper reconciliation first would replace
             # the last known-good real code before the provider call succeeds.
-            if not self._real_booking_enabled(settings):
+            if not failed_dates and not self._real_booking_enabled(settings):
                 await self.reconcile_statuses(sportybet.events, now=now)
             # Preserve every explicit Forebet DRAW; booking receives all validated matches.
             by_day: dict[date, list] = defaultdict(list)
@@ -304,8 +307,15 @@ class ForebetDrawEngine:
             for day in window_dates:
                 if day in failed_dates:
                     reason = diagnostics[day][0] if diagnostics[day] else "Forebet acquisition failed"
-                    self.store.record_acquisition(day, "error", provider_diagnostics, error_reason=reason)
-                    self.store.promote(day, None, [], source_urls, diagnostics[day], status="error")
+                    existing = current.get(day)
+                    state = self.store.get_acquisition_state(day)
+                    # A previously accepted external snapshot remains authoritative
+                    # when the worker's live provider is unavailable. Preserve its
+                    # active data and success freshness; expose the failure only in
+                    # worker diagnostics.
+                    if not (existing and state.get("last_success_at")):
+                        self.store.record_acquisition(day, "error", provider_diagnostics, error_reason=reason)
+                        self.store.promote(day, None, [], source_urls, diagnostics[day], status="error")
                     continue
                 deduped: dict[tuple, FixtureMatchResult] = {}
                 for result in grouped[day]:
