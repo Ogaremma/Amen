@@ -1,5 +1,5 @@
 """Acquire Forebet snapshots with the shared browser fallback and submit trusted raw HTML."""
-import argparse, json, os
+import argparse, json, os, time
 from pathlib import Path
 import httpx
 from app.services.forebet import _fetch_forebet_page_browser_sync, parse_forebet_html
@@ -12,13 +12,16 @@ def main():
     parser.add_argument("--headless", action="store_true", help="Use headless Chrome; headed mode is the proven local path")
     parser.add_argument("--diagnostic-dir", default=None)
     parser.add_argument("--no-submit", action="store_true", help="Acquire and report locally without contacting Render")
+    parser.add_argument("--delay-seconds", type=float, default=20.0, help="Pause between dated page fetches")
     args = parser.parse_args()
     if not args.token and not args.no_submit:
         raise SystemExit("FOREBET_INGESTION_TOKEN or --token is required")
     if not args.backend and not args.no_submit:
         raise SystemExit("AMEN_BACKEND_URL or --backend is required")
     snapshots = []
-    for prediction_date, url in zip(future_prediction_dates(), future_prediction_urls()):
+    for index, (prediction_date, url) in enumerate(zip(future_prediction_dates(), future_prediction_urls())):
+        if index:
+            time.sleep(max(0.0, args.delay_seconds))
         html = _fetch_forebet_page_browser_sync(url)
         matches = parse_forebet_html(html, url)
         snapshots.append({"prediction_date": prediction_date.isoformat(), "source_url": url, "raw_html": html, "matches": [m.model_dump(mode="json") for m in matches]})
