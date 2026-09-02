@@ -1,10 +1,8 @@
-"""Acquire Forebet snapshots with installed Chrome and submit trusted raw HTML."""
+"""Acquire Forebet snapshots with the shared browser fallback and submit trusted raw HTML."""
 import argparse, asyncio, json, os
 from pathlib import Path
-from urllib.parse import urlparse
 import httpx
-from playwright.async_api import async_playwright
-from app.services.forebet import parse_forebet_html
+from app.services.forebet import _fetch_forebet_page_browser_sync, parse_forebet_html
 from app.services.forebet_dates import future_prediction_dates, future_prediction_urls
 
 async def main():
@@ -20,30 +18,11 @@ async def main():
     if not args.backend and not args.no_submit:
         raise SystemExit("AMEN_BACKEND_URL or --backend is required")
     snapshots = []
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(channel="chrome", headless=args.headless)
-        try:
-            for prediction_date, url in zip(future_prediction_dates(), future_prediction_urls()):
-                context = await browser.new_context(locale="en-US", viewport={"width": 1366, "height": 768})
-                page = await context.new_page()
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                await page.wait_for_timeout(3000)
-                html = await page.content()
-                markers = [marker for marker in ("captcha", "cloudflare", "access denied", "verify you are human", "just a moment", "attention required") if marker in html.lower()]
-                diagnostic = {"url": url, "status": response.status if response else None, "final_url": page.url, "final_hostname": urlparse(page.url).hostname, "title": (await page.title())[:120], "schema_present": await page.locator(".schema").count() > 0, "schema_count": await page.locator(".schema").count(), "challenge_markers": markers, "chrome_channel": "chrome", "headless": args.headless, "fresh_context": True}
-                print(json.dumps(diagnostic))
-                if args.diagnostic_dir:
-                    out = Path(args.diagnostic_dir); out.mkdir(parents=True, exist_ok=True)
-                    await page.screenshot(path=str(out / f"forebet_{prediction_date.isoformat()}.png"), full_page=False)
-                    (out / f"forebet_{prediction_date.isoformat()}.html").write_text(html, encoding="utf-8")
-                await page.wait_for_selector(".schema", timeout=60000)
-                matches = parse_forebet_html(html, url)
-                snapshots.append({"prediction_date": prediction_date.isoformat(), "source_url": url, "raw_html": html, "matches": [m.model_dump(mode="json") for m in matches]})
-                print(json.dumps({"date": prediction_date.isoformat(), "status": response.status if response else None, "matches": len(matches), "draws": sum(m.predicted_result.value == "DRAW" for m in matches)}))
-                await page.close()
-                await context.close()
-        finally:
-            await browser.close()
+    for prediction_date, url in zip(future_prediction_dates(), future_prediction_urls()):
+        html = _fetch_forebet_page_browser_sync(url)
+        matches = parse_forebet_html(html, url)
+        snapshots.append({"prediction_date": prediction_date.isoformat(), "source_url": url, "raw_html": html, "matches": [m.model_dump(mode="json") for m in matches]})
+        print(json.dumps({"date": prediction_date.isoformat(), "matches": len(matches), "draws": sum(m.predicted_result.value == "DRAW" for m in matches)}))
     if args.no_submit:
         return
     async with httpx.AsyncClient(timeout=120) as client:
