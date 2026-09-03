@@ -21,6 +21,7 @@ import { copyTextToClipboard } from '../lib/clipboard'
 import type { BookingResponse, BookingSelection } from '../types/booking'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
+import { selectSplitGames, type SplitMode } from '../lib/splitter'
 
 function SwipeHistoryCard({ item, onOpen, onDeleted, onCopy, copied, copyError }: { item: HistoryItem; onOpen: (code: string) => void; onDeleted: () => void; onCopy: (code: string) => void; copied: boolean; copyError: boolean }) {
   const start = useRef<{ x: number; y: number } | null>(null)
@@ -104,7 +105,9 @@ export function DashboardPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [view, setView] = useState<'ticket' | 'ended'>('ticket')
+  const [view, setView] = useState<'ticket' | 'ended' | 'splitter'>('ticket')
+  const [splitters, setSplitters] = useState<number[]>([0])
+  const [splitResults, setSplitResults] = useState<Record<number, { loading?: boolean; code?: string; error?: string }>>({})
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyCopying, setHistoryCopying] = useState<string | null>(null)
@@ -274,6 +277,27 @@ export function DashboardPage() {
     }
   }
 
+  const runSplitter = async (id: number, mode: SplitMode) => {
+    if (!booking) return
+    const raw = window.prompt(`How many games for ${mode} split?`)
+    if (raw === null) return
+    const count = Number(raw)
+    if (!Number.isInteger(count) || count < 1 || count > activeSelections.length + endedSelections.length) {
+      setSplitResults((r) => ({ ...r, [id]: { error: `Enter a number between 1 and ${activeSelections.length + endedSelections.length}.` } }))
+      return
+    }
+    const allGames = sortChronologically(booking.selections)
+    const chosen = selectSplitGames(allGames, mode, count)
+    const omitted = allGames.filter((g) => !chosen.some((c) => c.event_id === g.event_id)).map((g) => g.event_id)
+    setSplitResults((r) => ({ ...r, [id]: { loading: true } }))
+    try {
+      const result = await removeSelectedGames(booking.booking_code, omitted)
+      setSplitResults((r) => ({ ...r, [id]: { code: result.booking_code } }))
+    } catch (err) {
+      setSplitResults((r) => ({ ...r, [id]: { error: err instanceof Error ? err.message : 'Unable to create split booking.' } }))
+    }
+  }
+
   const removeBar = (position: 'top' | 'bottom', showSelectAll = false) => (
     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border border-white/10 bg-surface/95 p-2.5 sm:gap-3 sm:p-3">
       <div className="min-w-0">
@@ -420,6 +444,10 @@ export function DashboardPage() {
     )
   }
 
+  if (view === 'splitter') {
+    const total = booking.selections.length
+    return <div className="mx-auto max-w-3xl space-y-4 overflow-x-hidden"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setView('ticket')} aria-label="Back to ticket details"><ArrowLeft className="h-4 w-4" />Back</Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">Splitter</h1><Button variant="outline" size="sm" className="ml-auto" onClick={() => setSplitters((s) => [...s, (s.at(-1) ?? 0) + 1])} aria-label="Add splitter">+</Button></header><div className="flex flex-col gap-3 sm:flex-row">{splitters.map((id) => { const result = splitResults[id]; return <Card key={id} className="flex-1 space-y-3 p-4"><div className="flex gap-2"><Button size="sm" onClick={() => runSplitter(id, 'top')}>Top</Button><Button size="sm" onClick={() => runSplitter(id, 'middle')}>Middle</Button><Button size="sm" onClick={() => runSplitter(id, 'bottom')}>Bottom</Button></div>{result?.loading && <p className="text-sm text-slate-300">Generating booking code...</p>}{result?.error && <p className="text-sm text-red-300">{result.error}</p>}{result?.code && <p className="break-all font-mono text-xl text-emerald-300">{result.code}</p>}<p className="text-xs text-slate-500">{total} loaded games</p></Card>})}</div></div>
+  }
   if (view === 'ended') {
     return (
       <div className="mx-auto max-w-3xl space-y-4 overflow-x-hidden">
@@ -500,6 +528,7 @@ export function DashboardPage() {
               <ChevronRight className="h-4 w-4 text-slate-500" />
             </button>
           )}
+          {booking.selections.length > 0 && <button type="button" onClick={() => setView('splitter')} className="mt-2 flex min-h-11 w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-200" aria-label="Open Splitter"><span>Splitter</span><ChevronRight className="h-4 w-4 text-slate-500" /></button>}
           <p className="mt-3 text-[11px] text-slate-500">Times shown in Africa/Lagos (UTC+1).</p>
         </Card>
       </header>
