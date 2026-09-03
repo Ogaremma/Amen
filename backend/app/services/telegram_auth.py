@@ -41,9 +41,7 @@ class TelegramUser:
 
 def _build_data_check_string(pairs: list[tuple[str, str]]) -> str:
     """Join all fields except ``hash`` as ``key=value`` lines, sorted by key."""
-    return "\n".join(
-        f"{key}={value}" for key, value in sorted(pairs) if key != "hash"
-    )
+    return "\n".join(f"{key}={value}" for key, value in sorted(pairs) if key != "hash")
 
 
 def _secret_key(bot_token: str) -> bytes:

@@ -8,9 +8,14 @@ import {
   CheckCheck,
   ChevronRight,
   Clipboard,
+  Copy,
   Clock3,
   CircleHelp,
   Loader2,
+  Eye,
+  EyeOff,
+  Edit3,
+  Plus,
   RefreshCw,
   Trash2,
   X,
@@ -106,8 +111,8 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [view, setView] = useState<'ticket' | 'ended' | 'splitter'>('ticket')
-  const [splitters, setSplitters] = useState<number[]>([0])
-  const [splitResults, setSplitResults] = useState<Record<number, { loading?: boolean; code?: string; error?: string }>>({})
+  type SplitCard = { id: number; state: 'empty' | 'selecting' | 'generating' | 'result' | 'error'; mode?: SplitMode; count?: number; code?: string; error?: string; games?: BookingSelection[]; revealed?: boolean }
+  const [splitters, setSplitters] = useState<SplitCard[]>([{ id: 0, state: 'empty' }])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyCopying, setHistoryCopying] = useState<string | null>(null)
@@ -142,6 +147,7 @@ export function DashboardPage() {
       setOriginalBookingCode(code)
       setBooking(loaded)
       setSelectedEventIds(new Set())
+      setSplitters([{ id: 0, state: 'empty' }])
       setView('ticket')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load ticket')
@@ -157,7 +163,7 @@ export function DashboardPage() {
 
   const reopenHistory = async (code: string) => {
     setHistoryOpen(false); setBookingCodeInput(code); setLoading(true)
-    try { const loaded = await fetchBookingByCode(code); setOriginalBookingCode(code); setBooking(loaded); setSelectedEventIds(new Set()); setView('ticket') }
+    try { const loaded = await fetchBookingByCode(code); setOriginalBookingCode(code); setBooking(loaded); setSelectedEventIds(new Set()); setSplitters([{ id: 0, state: 'empty' }]); setView('ticket') }
     catch (err) { setError(err instanceof Error ? err.message : 'Unable to load ticket') }
     finally { setLoading(false) }
   }
@@ -183,6 +189,7 @@ export function DashboardPage() {
       const restored = await fetchBookingByCode(originalBookingCode)
       setBooking(restored)
       setSelectedEventIds(new Set())
+      setSplitters([{ id: 0, state: 'empty' }])
       setNotice('Original ticket restored.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to restore the original ticket')
@@ -279,24 +286,34 @@ export function DashboardPage() {
 
   const runSplitter = async (id: number, mode: SplitMode) => {
     if (!booking) return
-    const raw = window.prompt(`How many games for ${mode} split?`)
-    if (raw === null) return
+    setSplitters((cards) => cards.map((card) => card.id === id ? { ...card, state: 'selecting', mode, error: undefined } : card))
+  }
+
+  const submitSplitter = async (id: number, raw: string) => {
+    const card = splitters.find((item) => item.id === id)
+    if (!booking || !card?.mode) return
     const count = Number(raw)
-    if (!Number.isInteger(count) || count < 1 || count > activeSelections.length + endedSelections.length) {
-      setSplitResults((r) => ({ ...r, [id]: { error: `Enter a number between 1 and ${activeSelections.length + endedSelections.length}.` } }))
+    const total = booking.selections.length
+    if (!Number.isInteger(count) || count < 1 || count > total) {
+      setSplitters((cards) => cards.map((item) => item.id === id ? { ...item, state: 'error', error: `Enter a number between 1 and ${total}.` } : item))
       return
     }
     const allGames = sortChronologically(booking.selections)
-    const chosen = selectSplitGames(allGames, mode, count)
+    const chosen = selectSplitGames(allGames, card.mode, count)
     const omitted = allGames.filter((g) => !chosen.some((c) => c.event_id === g.event_id)).map((g) => g.event_id)
-    setSplitResults((r) => ({ ...r, [id]: { loading: true } }))
+    setSplitters((cards) => cards.map((item) => item.id === id ? { ...item, state: 'generating', count, error: undefined } : item))
     try {
       const result = await removeSelectedGames(booking.booking_code, omitted)
-      setSplitResults((r) => ({ ...r, [id]: { code: result.booking_code } }))
+      setSplitters((cards) => cards.map((item) => item.id === id ? { ...item, state: 'result', code: result.booking_code, games: chosen, revealed: false } : item))
     } catch (err) {
-      setSplitResults((r) => ({ ...r, [id]: { error: err instanceof Error ? err.message : 'Unable to create split booking.' } }))
+      setSplitters((cards) => cards.map((item) => item.id === id ? { ...item, state: 'error', error: err instanceof Error ? err.message : 'Unable to create split booking.' } : item))
     }
   }
+
+  const resetSplitter = (id: number) => setSplitters((cards) => cards.map((item) => item.id === id ? { id, state: 'empty' } : item))
+  const addSplitter = () => setSplitters((cards) => [...cards, { id: Date.now(), state: 'empty' }])
+  const copyValue = async (value: string) => { try { await copyTextToClipboard(value) } catch { setError('Unable to copy to clipboard.') } }
+  const copyAllSplits = async () => { const text = splitters.filter((c) => c.state === 'result' && c.code && c.mode && c.count).map((c) => `${c.mode![0].toUpperCase()}${c.mode!.slice(1)} ${c.count} from ${originalBookingCode}\n${c.code}`).join('\n\n'); if (text) await copyValue(text) }
 
   const removeBar = (position: 'top' | 'bottom', showSelectAll = false) => (
     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border border-white/10 bg-surface/95 p-2.5 sm:gap-3 sm:p-3">
@@ -446,7 +463,7 @@ export function DashboardPage() {
 
   if (view === 'splitter') {
     const total = booking.selections.length
-    return <div className="mx-auto max-w-3xl space-y-4 overflow-x-hidden"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setView('ticket')} aria-label="Back to ticket details"><ArrowLeft className="h-4 w-4" />Back</Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">Splitter</h1><Button variant="outline" size="sm" className="ml-auto" onClick={() => setSplitters((s) => [...s, (s.at(-1) ?? 0) + 1])} aria-label="Add splitter">+</Button></header><div className="flex flex-col gap-3 sm:flex-row">{splitters.map((id) => { const result = splitResults[id]; return <Card key={id} className="flex-1 space-y-3 p-4"><div className="flex gap-2"><Button size="sm" onClick={() => runSplitter(id, 'top')}>Top</Button><Button size="sm" onClick={() => runSplitter(id, 'middle')}>Middle</Button><Button size="sm" onClick={() => runSplitter(id, 'bottom')}>Bottom</Button></div>{result?.loading && <p className="text-sm text-slate-300">Generating booking code...</p>}{result?.error && <p className="text-sm text-red-300">{result.error}</p>}{result?.code && <p className="break-all font-mono text-xl text-emerald-300">{result.code}</p>}<p className="text-xs text-slate-500">{total} loaded games</p></Card>})}</div></div>
+    return <div className="mx-auto max-w-3xl space-y-4 overflow-x-hidden"><header className="flex items-center gap-3"><Button variant="outline" size="sm" onClick={() => setView('ticket')} aria-label="Back to ticket details"><ArrowLeft className="h-4 w-4" />Back</Button><h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">Splitter</h1><div className="ml-auto flex gap-2"><button type="button" aria-label="Refresh all splitters" onClick={() => setSplitters([{ id: 0, state: 'empty' }])} className="rounded-lg border border-white/10 p-2"><RefreshCw className="h-4 w-4" /></button><button type="button" aria-label="Copy all split booking codes" onClick={copyAllSplits} className="rounded-lg border border-white/10 p-2"><Copy className="h-4 w-4" /></button></div></header><div className="flex flex-col gap-3 sm:flex-row">{splitters.map((card) => <Card key={card.id} className="flex-1 space-y-3 p-4">{(card.state === 'empty' || card.state === 'selecting') && <div className="flex gap-2"><Button size="sm" onClick={() => runSplitter(card.id, 'top')}>Top</Button><Button size="sm" onClick={() => runSplitter(card.id, 'middle')}>Middle</Button><Button size="sm" onClick={() => runSplitter(card.id, 'bottom')}>Bottom</Button></div>}{card.state === 'selecting' && <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void submitSplitter(card.id, (e.currentTarget.elements.namedItem('count') as HTMLInputElement).value) }}><Input name="count" type="number" min="1" max={total} defaultValue={card.count} autoFocus aria-label={`Number of games for splitter ${card.id}`} /><Button type="submit" size="sm">Confirm</Button></form>}{card.state === 'generating' && <p className="text-sm text-slate-300"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Generating booking code...</p>}{card.state === 'error' && <><p className="text-sm text-red-300">{card.error}</p><button type="button" aria-label={`Refresh splitter ${card.id}`} onClick={() => resetSplitter(card.id)} className="rounded-lg border border-white/10 p-2"><RefreshCw className="h-4 w-4" /></button></>}{card.state === 'result' && <><p className="break-all font-mono text-xl text-emerald-300">{card.code}</p><p className="text-sm text-slate-300">{card.mode![0].toUpperCase() + card.mode!.slice(1)} {card.count} from <button type="button" className="text-accent underline" onClick={() => void copyValue(originalBookingCode ?? '')}>{originalBookingCode}</button></p><div className="flex gap-2"><button aria-label="Toggle split games" onClick={() => setSplitters((cards) => cards.map((c) => c.id === card.id ? { ...c, revealed: !c.revealed } : c))} className="rounded-lg border border-white/10 p-2">{card.revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button><button aria-label="Edit splitter" onClick={() => setSplitters((cards) => cards.map((c) => c.id === card.id ? { ...c, state: 'selecting' } : c))} className="rounded-lg border border-white/10 p-2"><Edit3 className="h-4 w-4" /></button><button aria-label="Add splitter" onClick={addSplitter} className="rounded-lg border border-white/10 p-2"><Plus className="h-4 w-4" /></button><button aria-label="Refresh splitter" onClick={() => resetSplitter(card.id)} className="rounded-lg border border-white/10 p-2"><RefreshCw className="h-4 w-4" /></button><button aria-label="Copy split booking code" onClick={() => void copyValue(card.code!)} className="rounded-lg border border-white/10 p-2"><Copy className="h-4 w-4" /></button></div>{card.revealed && <div className="space-y-2">{card.games?.map((game) => <div key={game.event_id} className="rounded-lg border border-white/10 p-2 text-sm text-slate-200">{game.home} vs {game.away}</div>)}</div>}</>}</Card>)}</div></div>
   }
   if (view === 'ended') {
     return (
