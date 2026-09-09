@@ -49,7 +49,7 @@ export async function removeSelectedGames(
     buildUrl(`/bookings/${encodeURIComponent(bookingCode)}/remove-selected`),
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...telegramHeaders() },
       body: JSON.stringify({ event_ids: eventIds }),
     },
   )
