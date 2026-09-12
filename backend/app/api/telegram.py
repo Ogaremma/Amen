@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.config.settings import get_settings
 from app.schemas.telegram import (
@@ -10,9 +10,14 @@ from app.schemas.telegram import (
     TelegramUserOut,
 )
 from app.services.session_store import session_store
+from app.services.telegram_user_store import TelegramUserStore, telegram_user_store
 from app.services.telegram_auth import TelegramAuthError, verify_init_data
 
 router = APIRouter(prefix="/api/v1/telegram", tags=["telegram"])
+
+
+def get_telegram_user_store() -> TelegramUserStore:
+    return telegram_user_store
 
 
 @router.post(
@@ -26,7 +31,10 @@ router = APIRouter(prefix="/api/v1/telegram", tags=["telegram"])
         "token is never returned or logged."
     ),
 )
-async def telegram_auth(request: TelegramAuthRequest) -> TelegramAuthResponse:
+async def telegram_auth(
+    request: TelegramAuthRequest,
+    user_store: TelegramUserStore = Depends(get_telegram_user_store),
+) -> TelegramAuthResponse:
     settings = get_settings()
     token = settings.telegram_bot_token
     if not token:
@@ -54,6 +62,7 @@ async def telegram_auth(request: TelegramAuthRequest) -> TelegramAuthResponse:
         language_code=user.language_code,
         profile=user.raw,
     )
+    user_store.upsert_from_auth(user.telegram_user_id)
 
     return TelegramAuthResponse(
         ok=True,

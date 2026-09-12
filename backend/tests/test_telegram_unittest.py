@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.telegram import get_telegram_user_store
 from app.services import session_store as session_store_module
 from app.services.telegram_auth import (
     TelegramAuthError,
@@ -157,11 +158,24 @@ def _fake_settings(token: str | None, max_age: int = 86_400):
     )
 
 
+class FakeTelegramUserStore:
+    def __init__(self):
+        self.users: list[int] = []
+
+    def upsert_from_auth(self, telegram_user_id: int):
+        self.users.append(telegram_user_id)
+
+
 class TelegramAuthEndpointTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
+        self.user_store = FakeTelegramUserStore()
+        app.dependency_overrides[get_telegram_user_store] = lambda: self.user_store
         # Isolate the session store between tests.
         session_store_module.session_store._sessions.clear()
+
+    def tearDown(self):
+        app.dependency_overrides.pop(get_telegram_user_store, None)
 
     def test_auth_success_returns_verified_user_without_token(self):
         init_data = make_init_data(TEST_TOKEN, auth_date=1_700_000_000)
@@ -177,6 +191,7 @@ class TelegramAuthEndpointTests(unittest.TestCase):
         self.assertTrue(body["ok"])
         self.assertEqual(body["user"]["telegram_user_id"], 424242)
         self.assertEqual(body["user"]["username"], "ada")
+        self.assertEqual(self.user_store.users, [424242])
         # The bot token must NEVER appear anywhere in the response.
         self.assertNotIn(TEST_TOKEN, resp.text)
         self.assertNotIn("token", body)
@@ -292,6 +307,35 @@ class BotHandlerTests(unittest.TestCase):
         self.assertEqual(payload["chat_id"], 777)
         button = payload["reply_markup"]["inline_keyboard"][0][0]
         self.assertEqual(button["web_app"]["url"], self.WEBAPP_URL)
+
+    def test_start_command_persists_verified_bot_user(self):
+        class RecordingUserStore:
+            def __init__(self):
+                self.calls: list[tuple[int, int]] = []
+
+            def upsert_from_start(self, telegram_user_id: int, telegram_chat_id: int):
+                self.calls.append((telegram_user_id, telegram_chat_id))
+
+        client = _FakeClient()
+        user_store = RecordingUserStore()
+        bot = TelegramBot(
+            TEST_TOKEN,
+            self.WEBAPP_URL,
+            client=client,
+            user_store=user_store,
+        )
+        update = {
+            "update_id": 10,
+            "message": {
+                "chat": {"id": 777},
+                "from": {"id": 777},
+                "text": "/start",
+            },
+        }
+        handled = asyncio.run(bot.handle_update(update))
+        self.assertTrue(handled)
+        self.assertEqual(user_store.calls, [(777, 777)])
+        self.assertEqual(len(client.posts), 1)
 
     def test_start_with_bot_suffix_is_handled(self):
         bot, client = self._bot()

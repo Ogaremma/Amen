@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from app.config.settings import get_settings
+from app.services.telegram_user_store import TelegramUserStore
 
 logger = logging.getLogger("amen.telegram.bot")
 
@@ -100,6 +101,7 @@ class TelegramBot:
         *,
         client: httpx.AsyncClient | None = None,
         api_base: str = TELEGRAM_API_BASE,
+        user_store: TelegramUserStore | None = None,
     ) -> None:
         if not token:
             raise ValueError("TELEGRAM_BOT_TOKEN is required to run the bot")
@@ -110,6 +112,7 @@ class TelegramBot:
         self._api_base = api_base.rstrip("/")
         self._client = client
         self._owns_client = client is None
+        self.user_store = user_store
 
     def _url(self, method: str) -> str:
         # Token appears only in the outbound URL to Telegram, never logged.
@@ -135,6 +138,9 @@ class TelegramBot:
         await self._call("setMyCommands", build_commands())
         logger.info("Configured Telegram menu button and commands")
 
+    async def send_message(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._call("sendMessage", payload)
+
     async def handle_update(self, update: dict[str, Any]) -> bool:
         """Process one update. Returns True if a /start reply was sent."""
         parsed = _extract_command(update)
@@ -143,6 +149,18 @@ class TelegramBot:
         chat_id, command = parsed
         if command != "start":
             return False
+        message = update.get("message") or update.get("edited_message")
+        from_user = message.get("from") if isinstance(message, dict) else None
+        telegram_user_id = (
+            from_user.get("id")
+            if isinstance(from_user, dict) and isinstance(from_user.get("id"), int)
+            else chat_id
+        )
+        if self.user_store is not None:
+            try:
+                self.user_store.upsert_from_start(telegram_user_id, chat_id)
+            except Exception:
+                logger.exception("Failed to persist Telegram bot user %s", telegram_user_id)
         await self._call("sendMessage", build_start_message(chat_id, self._webapp_url))
         logger.info("Handled /start for chat %s", chat_id)
         return True
@@ -198,7 +216,7 @@ def main() -> None:
         raise SystemExit(
             "TELEGRAM_WEBAPP_URL is not set. Add your deployed Mini App URL to backend/.env."
         )
-    bot = TelegramBot(token, webapp_url)
+    bot = TelegramBot(token, webapp_url, user_store=TelegramUserStore())
     asyncio.run(bot.run())
 
 

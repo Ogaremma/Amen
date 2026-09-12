@@ -6,7 +6,7 @@ import math
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -19,6 +19,11 @@ from app.schemas.forebet import (
     FixtureMatchResult,
     FixtureMatchStatus,
     SportyBetEvent,
+)
+from app.schemas.sportybet_markets import OverOneHalfCandidate, SportyBetMarketCatalogPage
+from app.services.sportybet_markets import (
+    extract_over_one_half_candidates,
+    parse_upcoming_events_markets,
 )
 
 logger = logging.getLogger("amen.sportybet")
@@ -176,10 +181,10 @@ def _upcoming_url() -> str:
     return f"{settings.sportybet_base_url.rstrip('/')}/{settings.sportybet_upcoming_path.strip('/')}"
 
 
-async def _fetch_upcoming_page(
+async def _fetch_upcoming_page_payload(
     page_num: int,
     page_size: int,
-) -> SportyBetUpcomingEventsResult:
+) -> dict[str, Any]:
     max_attempts = 3
     backoff = 0.75
 
@@ -207,7 +212,7 @@ async def _fetch_upcoming_page(
                     response.status_code,
                 )
 
-                return parse_upcoming_events_page(payload)
+                return payload
 
             logger.warning(
                 "sportybet_upcoming_page_failed page=%s attempt=%s status=%s",
@@ -240,6 +245,24 @@ async def _fetch_upcoming_page(
     )
 
 
+async def _fetch_upcoming_page(
+    page_num: int,
+    page_size: int,
+) -> SportyBetUpcomingEventsResult:
+    return parse_upcoming_events_page(
+        await _fetch_upcoming_page_payload(page_num, page_size)
+    )
+
+
+async def _fetch_upcoming_market_page(
+    page_num: int,
+    page_size: int,
+) -> SportyBetMarketCatalogPage:
+    return parse_upcoming_events_markets(
+        await _fetch_upcoming_page_payload(page_num, page_size)
+    )
+
+
 async def _request_upcoming_page(
     page_num: int,
     page_size: int,
@@ -260,6 +283,39 @@ async def _request_upcoming_page(
         )
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return (
+        value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    ).astimezone(timezone.utc)
+
+
+async def _collect_upcoming_catalog(
+    fetch_page: Callable[[int, int], Awaitable[Any]],
+    size: int,
+    limit: int,
+) -> tuple[list[Any], int, int, int, bool]:
+    results: list[Any] = []
+    total_num = 0
+    pages_fetched = 0
+    retrieved_num = 0
+    complete = False
+    for page in range(1, limit + 1):
+        result = await fetch_page(page, size)
+        pages_fetched = page
+        total_num = result.total_num
+        results.append(result)
+        retrieved_num += result.retrieved_num
+        if result.retrieved_num == 0:
+            complete = True
+            break
+        if page * size >= total_num:
+            complete = True
+            break
+    return results, total_num, pages_fetched, retrieved_num, complete
+
+
 async def get_upcoming_football_events(
     start_datetime: datetime | None = None,
     end_datetime: datetime | None = None,
@@ -271,35 +327,14 @@ async def get_upcoming_football_events(
     if size < 1 or size > 100 or limit < 1:
         raise ValueError("Invalid SportyBet pagination configuration")
 
-    def as_utc(value: datetime | None) -> datetime | None:
-        if value is None:
-            return None
-        return (
-            value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        ).astimezone(timezone.utc)
-
-    start, end = as_utc(start_datetime), as_utc(end_datetime)
+    start, end = _as_utc(start_datetime), _as_utc(end_datetime)
     if start and end and start > end:
         raise ValueError("start_datetime must not be after end_datetime")
 
-    all_events: list[SportyBetEvent] = []
-    total_num = 0
-    pages_fetched = 0
-    retrieved_num = 0
-    complete = False
-    for page in range(1, limit + 1):
-        result = await _fetch_upcoming_page(page, size)
-        pages_fetched = page
-        total_num = result.total_num
-        all_events.extend(result.events)
-        retrieved_num += len(result.events)
-        if not result.events:
-            complete = True
-            break
-        if page * size >= total_num:
-            complete = True
-            break
-
+    results, total_num, pages_fetched, retrieved_num, complete = (
+        await _collect_upcoming_catalog(_fetch_upcoming_page, size, limit)
+    )
+    all_events = [event for result in results for event in result.events]
     filtered = [
         event
         for event in all_events
@@ -307,6 +342,58 @@ async def get_upcoming_football_events(
         and (end is None or event.kickoff <= end)
     ]
     return SportyBetUpcomingEventsResult(total_num, filtered, pages_fetched, retrieved_at=datetime.now(timezone.utc), complete=complete, retrieved_num=retrieved_num)
+
+
+async def get_upcoming_football_market_fixtures(
+    start_datetime: datetime | None = None,
+    end_datetime: datetime | None = None,
+    page_size: int | None = None,
+    max_pages: int | None = None,
+) -> SportyBetMarketCatalogPage:
+    size = page_size or settings.sportybet_upcoming_page_size
+    limit = max_pages or settings.sportybet_upcoming_max_pages
+    if size < 1 or size > 100 or limit < 1:
+        raise ValueError("Invalid SportyBet pagination configuration")
+
+    start, end = _as_utc(start_datetime), _as_utc(end_datetime)
+    if start and end and start > end:
+        raise ValueError("start_datetime must not be after end_datetime")
+
+    results, total_num, pages_fetched, retrieved_num, complete = (
+        await _collect_upcoming_catalog(_fetch_upcoming_market_page, size, limit)
+    )
+    all_fixtures = [
+        fixture for result in results for fixture in result.fixtures
+    ]
+    filtered = [
+        fixture
+        for fixture in all_fixtures
+        if (start is None or fixture.kickoff >= start)
+        and (end is None or fixture.kickoff <= end)
+    ]
+    return SportyBetMarketCatalogPage(
+        total_num=total_num,
+        fixtures=filtered,
+        pages_fetched=pages_fetched,
+        retrieved_at=datetime.now(timezone.utc),
+        complete=complete,
+        retrieved_num=retrieved_num,
+    )
+
+
+async def get_upcoming_over_one_half_candidates(
+    start_datetime: datetime | None = None,
+    end_datetime: datetime | None = None,
+    page_size: int | None = None,
+    max_pages: int | None = None,
+) -> list[OverOneHalfCandidate]:
+    catalogue = await get_upcoming_football_market_fixtures(
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+        page_size=page_size,
+        max_pages=max_pages,
+    )
+    return extract_over_one_half_candidates(catalogue.fixtures)
 
 
 def determine_game_status(
@@ -507,12 +594,15 @@ def _build_selection(
     local_kickoff = kickoff.astimezone(_LAGOS)
     raw_status = event.get("matchStatus")
     game_status = determine_game_status(raw_status, kickoff, now)
+    home_score, away_score = _parse_set_score(event.get("setScore"))
 
     return BookingSelection(
         id=str(event_id),
         event_id=str(event_id),
         market_id=str(selection.get("marketId")),
         outcome_id=str(selection.get("outcomeId")),
+        product_id=_to_int(selection.get("productId")),
+        sport_id=(str(selection["sportId"]) if selection.get("sportId") is not None else None),
         home=event.get("homeTeamName") or "Unknown",
         away=event.get("awayTeamName") or "Unknown",
         competition=tournament.get("name") or "Unknown competition",
@@ -527,9 +617,28 @@ def _build_selection(
         odds=_to_float(picked.get("odds")),
         specifier=specifier,
         status=raw_status,
+        home_score=home_score,
+        away_score=away_score,
         game_status=game_status,
         result_status=determine_result_status(game_status, picked),
     )
+
+
+def _parse_set_score(value: Any) -> tuple[int | None, int | None]:
+    """Parse SportyBet's ``home:away`` score without inventing missing values."""
+    if not isinstance(value, str):
+        return None, None
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        return None, None
+    try:
+        home_score = int(parts[0].strip(), base=10)
+        away_score = int(parts[1].strip(), base=10)
+    except ValueError:
+        return None, None
+    if home_score < 0 or away_score < 0:
+        return None, None
+    return home_score, away_score
 
 
 def parse_booking(

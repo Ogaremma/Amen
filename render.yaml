@@ -80,3 +80,97 @@ services:
 
       - key: TELEGRAM_AUTH_MAX_AGE
         value: "86400"
+
+  - type: cron
+    name: amen-prediction-daily
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    schedule: "0 23 * * *"
+    dockerCommand: python -m app.prediction_daily_runner
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: DATABASE_URL
+      - key: TELEGRAM_BOT_TOKEN
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: TELEGRAM_BOT_TOKEN
+      - key: TELEGRAM_WEBAPP_URL
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: TELEGRAM_WEBAPP_URL
+      - key: SPORTYBET_BASE_URL
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_BASE_URL
+      - key: SPORTYBET_SHARE_PATH
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_SHARE_PATH
+      - key: SPORTYBET_UPCOMING_PATH
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_UPCOMING_PATH
+      - key: SPORTYBET_FOOTBALL_SPORT_ID
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_FOOTBALL_SPORT_ID
+      - key: SPORTYBET_UPCOMING_MARKET_IDS
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_UPCOMING_MARKET_IDS
+      - key: SPORTYBET_UPCOMING_PAGE_SIZE
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_UPCOMING_PAGE_SIZE
+      - key: SPORTYBET_UPCOMING_MAX_PAGES
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_UPCOMING_MAX_PAGES
+      - key: SPORTYBET_TIMEOUT
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_TIMEOUT
+      - key: SPORTYBET_ACQUISITION_TTL_SECONDS
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: SPORTYBET_ACQUISITION_TTL_SECONDS
+
+  - type: worker
+    name: amen-telegram-bot
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python -m app.telegram.bot
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: DATABASE_URL
+      - key: TELEGRAM_BOT_TOKEN
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: TELEGRAM_BOT_TOKEN
+      - key: TELEGRAM_WEBAPP_URL
+        fromService:
+          name: amen-backend-staging
+          type: web
+          envVarKey: TELEGRAM_WEBAPP_URL

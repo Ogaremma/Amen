@@ -13,6 +13,8 @@ class BookingSelection(BaseModel):
     event_id: str = Field(..., description="SportyBet event identifier, e.g. sr:match:72348792")
     market_id: str = Field(..., description="SportyBet market identifier")
     outcome_id: str = Field(..., description="SportyBet selected outcome identifier")
+    product_id: int | None = Field(None, description="SportyBet product identifier")
+    sport_id: str | None = Field(None, description="SportyBet sport identifier")
     home: str = Field(..., description="Home team name")
     away: str = Field(..., description="Away team name")
     competition: str = Field(..., description="Tournament / league name")
@@ -31,6 +33,12 @@ class BookingSelection(BaseModel):
     )
     specifier: str | None = Field(None, description="Market specifier, e.g. total=8.5")
     status: str | None = Field(None, description="Match status reported by SportyBet")
+    home_score: int | None = Field(
+        None, description="Current or final home score parsed from setScore"
+    )
+    away_score: int | None = Field(
+        None, description="Current or final away score parsed from setScore"
+    )
     game_status: Literal["upcoming", "live", "ended"] = Field(
         ..., description="Normalized game status for the Amen ticket UI"
     )

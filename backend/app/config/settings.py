@@ -105,6 +105,11 @@ class Settings(BaseSettings):
         validation_alias="TELEGRAM_WEBAPP_URL",
     )
 
+    telegram_prediction_chat_id: str | None = Field(
+        default=None,
+        validation_alias="TELEGRAM_PREDICTION_CHAT_ID",
+    )
+
     telegram_auth_max_age: int = Field(
         default=86400,
         validation_alias="TELEGRAM_AUTH_MAX_AGE",
