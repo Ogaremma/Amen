@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import hmac
+from typing import Any
+
+import httpx
+from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.config.settings import get_settings
 from app.schemas.telegram import (
@@ -12,12 +16,73 @@ from app.schemas.telegram import (
 from app.services.session_store import session_store
 from app.services.telegram_user_store import TelegramUserStore, telegram_user_store
 from app.services.telegram_auth import TelegramAuthError, verify_init_data
+from app.telegram.bot import TelegramBot
 
 router = APIRouter(prefix="/api/v1/telegram", tags=["telegram"])
 
 
 def get_telegram_user_store() -> TelegramUserStore:
     return telegram_user_store
+
+
+@router.post(
+    "/webhook",
+    status_code=200,
+    summary="Receive Telegram bot updates",
+    description=(
+        "Authenticates Telegram's secret-token header, processes the update with "
+        "the existing bot command handler, and persists verified Telegram users. "
+        "No credential or raw update payload is logged."
+    ),
+)
+async def telegram_webhook(
+    update: dict[str, Any],
+    user_store: TelegramUserStore = Depends(get_telegram_user_store),
+    x_telegram_bot_api_secret_token: str | None = Header(
+        None,
+        alias="X-Telegram-Bot-Api-Secret-Token",
+    ),
+) -> dict[str, bool]:
+    settings = get_settings()
+    configured_secret = settings.telegram_webhook_secret
+    if not configured_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram webhook is not configured",
+        )
+    if (
+        x_telegram_bot_api_secret_token is None
+        or not hmac.compare_digest(
+            x_telegram_bot_api_secret_token.encode("utf-8"),
+            configured_secret.encode("utf-8"),
+        )
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Telegram webhook secret",
+        )
+    if not settings.telegram_bot_token or not settings.telegram_webapp_url:
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram bot is not configured",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(35.0)) as client:
+            bot = TelegramBot(
+                settings.telegram_bot_token,
+                settings.telegram_webapp_url,
+                client=client,
+                user_store=user_store,
+            )
+            await bot.handle_update(update)
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(
+            status_code=502,
+            detail="Telegram update processing failed",
+        ) from None
+
+    return {"ok": True}
 
 
 @router.post(

@@ -105,6 +105,16 @@ class Settings(BaseSettings):
         validation_alias="TELEGRAM_WEBAPP_URL",
     )
 
+    telegram_webhook_url: str | None = Field(
+        default=None,
+        validation_alias="TELEGRAM_WEBHOOK_URL",
+    )
+
+    telegram_webhook_secret: str | None = Field(
+        default=None,
+        validation_alias="TELEGRAM_WEBHOOK_SECRET",
+    )
+
     telegram_prediction_chat_id: str | None = Field(
         default=None,
         validation_alias="TELEGRAM_PREDICTION_CHAT_ID",

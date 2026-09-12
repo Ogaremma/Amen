@@ -2,9 +2,15 @@
 
 ## Status
 
-Phase 4I provides a bounded, scheduler-compatible command and database-backed idempotency. It does **not** start a hidden scheduler inside the FastAPI web process.
+Production uses a free-compatible architecture:
 
-The current `render.yaml` defines one Docker web service. That service is not, by itself, a guaranteed daily scheduler. Automatic 00:00 Africa/Lagos execution requires a separately enabled Render Cron Job or another external scheduler.
+- Render Free Web Service for the FastAPI backend and Telegram webhook.
+- Render Postgres for production persistence.
+- GitHub Actions for the bounded daily prediction runner.
+
+`render.yaml` intentionally defines only the free Docker web service. Render Background Worker and Render Cron services are **not required** and must not be added for this deployment.
+
+Telegram production traffic uses webhook mode. The local long-polling entry point remains available for development, but the backend does not require a polling process in production.
 
 ## Timezone
 
@@ -29,18 +35,14 @@ Phase 4F's compatibility service continues to identify its historical UTC genera
 The bounded entry point is:
 
 ```bash
-python -m app.prediction_daily_runner --chat-id <telegram-chat-id>
+python -m app.prediction_daily_runner
 ```
 
-It can also read:
-
-```text
-TELEGRAM_PREDICTION_CHAT_ID
-```
+It reads eligible recipients from the production `telegram_bot_users` table. `TELEGRAM_PREDICTION_CHAT_ID` is not required for production fan-out.
 
 The command performs one generation/delivery attempt and exits. It contains no polling loop.
 
-## Render Scheduling
+## Production Scheduling
 
 The required cron expression in UTC is:
 
@@ -48,30 +50,35 @@ The required cron expression in UTC is:
 0 23 * * *
 ```
 
-A future Render Cron Job would conceptually use:
+GitHub Actions runs this schedule through `.github/workflows/prediction-daily.yml`. The workflow also supports `workflow_dispatch` for a controlled manual test.
 
-```yaml
-services:
-  - type: cron
-    name: amen-prediction-daily
-    runtime: docker
-    rootDir: backend
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    schedule: "0 23 * * *"
-    command: python -m app.prediction_daily_runner
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_WEBAPP_URL
-        sync: false
-      - key: TELEGRAM_PREDICTION_CHAT_ID
-        sync: false
+Required GitHub Actions secrets are:
+
+- `DATABASE_URL`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_WEBAPP_URL`
+
+`DATABASE_URL` must be the externally reachable Render Postgres connection URL for the same `amen-postgres` database used by the web service. Render's internal-only database hostname is not reachable from GitHub-hosted runners.
+
+The workflow explicitly supplies the same non-secret SportyBet production values used by the Render web service. It does not need `TELEGRAM_WEBHOOK_SECRET`, because the prediction runner sends Telegram messages but does not receive webhook updates.
+
+## Telegram Webhook
+
+The production webhook route is:
+
+```text
+/api/v1/telegram/webhook
 ```
 
-This cron service has **not** been added to `render.yaml` in Phase 4I. The current deployment therefore does not yet guarantee automatic daily execution.
+Requests are authenticated with Telegram's `X-Telegram-Bot-Api-Secret-Token` header. `TELEGRAM_WEBHOOK_SECRET` must be a cryptographically strong value, at least 32 characters long, and must not equal the bot token.
+
+After the Render environment contains `TELEGRAM_WEBHOOK_URL` and `TELEGRAM_WEBHOOK_SECRET`, register the webhook once from an environment with the production credentials:
+
+```bash
+python -m app.telegram.set_webhook
+```
+
+`TELEGRAM_WEBHOOK_URL` must be the public Render HTTPS URL ending in `/api/v1/telegram/webhook`. Use `python -m app.telegram.set_webhook --status` to inspect the registered webhook without printing credentials.
 
 ## Daily Output
 
