@@ -63,6 +63,7 @@ class SportyBetMarketCatalogPage(BaseModel):
     retrieved_at: datetime | None = None
     complete: bool = True
     retrieved_num: int | None = None
+    more_events: bool | None = None
 
     def is_fresh(self, ttl_seconds: float, *, now: datetime | None = None) -> bool:
         if self.retrieved_at is None:

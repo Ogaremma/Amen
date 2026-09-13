@@ -9,7 +9,15 @@ from typing import Any
 import httpx
 
 from app.config.settings import get_settings
-from app.schemas.prediction_daily_broadcast import TelegramRecipient
+from app.schemas.prediction_daily_broadcast import (
+    DailyPredictionBroadcastResult,
+    PredictionRecipientDeliveryResult,
+    TelegramRecipient,
+)
+from app.schemas.prediction_daily_production import (
+    PredictionMessageCategory,
+    PredictionMessageDeliveryStatus,
+)
 from app.services.prediction_booking import PredictionBookingService
 from app.services.prediction_daily import SportyBetEvidenceEvaluationProvider
 from app.services.prediction_daily_production import DailyPredictionProductionService
@@ -49,6 +57,155 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--page-size', type=int, default=None)
     parser.add_argument('--max-pages', type=int, default=None)
     return parser
+
+
+def _result_diagnostics(result) -> dict[str, Any]:
+    if result is None:
+        return {
+            'counts_available': False,
+            'qualifying_selection_count': None,
+            'model_selected_selection_count': None,
+            'qualifying_today_batch_count': None,
+            'qualifying_tomorrow_batch_count': None,
+            'prediction_today_batch_count': None,
+            'prediction_tomorrow_batch_count': None,
+            'catalogue': {'available': False},
+        }
+
+    catalogue = result.catalogue
+    return {
+        'counts_available': True,
+        'qualifying_selection_count': (
+            result.qualifying.today.selection_count
+            + result.qualifying.tomorrow.selection_count
+        ),
+        'model_selected_selection_count': (
+            result.predictions.today.selection_count
+            + result.predictions.tomorrow.selection_count
+        ),
+        'qualifying_today_batch_count': len(result.qualifying.today.batches),
+        'qualifying_tomorrow_batch_count': len(result.qualifying.tomorrow.batches),
+        'prediction_today_batch_count': sum(
+            len(group.batches) for group in result.predictions.today.groups
+        ),
+        'prediction_tomorrow_batch_count': sum(
+            len(group.batches) for group in result.predictions.tomorrow.groups
+        ),
+        'catalogue': {
+            'available': True,
+            'status': result.status.value,
+            'retrieved_total': catalogue.retrieved_total,
+            'parsed_fixtures': catalogue.parsed_fixtures,
+            'pages_fetched': catalogue.pages_fetched,
+            'pagination_complete': catalogue.pagination_complete,
+            'fresh': catalogue.fresh,
+            'authoritative': catalogue.authoritative,
+            'error': catalogue.error,
+        },
+    }
+
+
+def _delivery_diagnostics(
+    recipients: list[PredictionRecipientDeliveryResult],
+) -> dict[str, Any]:
+    def category_counts(category: PredictionMessageCategory) -> dict[str, int]:
+        records = []
+        for recipient in recipients:
+            record = (
+                recipient.qualifying_delivery
+                if category == PredictionMessageCategory.qualifying
+                else recipient.prediction_delivery
+            )
+            if record is not None:
+                records.append(record)
+        return {
+            'delivered': sum(
+                record.status == PredictionMessageDeliveryStatus.delivered
+                for record in records
+            ),
+            'failed': sum(
+                record.status == PredictionMessageDeliveryStatus.failed
+                for record in records
+            ),
+            'undeliverable': sum(
+                record.status == PredictionMessageDeliveryStatus.undeliverable
+                for record in records
+            ),
+            'pending': sum(
+                record.status == PredictionMessageDeliveryStatus.pending
+                for record in records
+            ),
+        }
+
+    return {
+        'qualifying': category_counts(PredictionMessageCategory.qualifying),
+        'predictions': category_counts(PredictionMessageCategory.predictions),
+    }
+
+
+def _skipped_categories(
+    result: DailyPredictionBroadcastResult,
+    eligible_recipient_count: int,
+) -> list[dict[str, str | int]]:
+    if result.result is None:
+        reason = result.outcome.value
+        return [
+            {'category': category.value, 'reason': reason}
+            for category in PredictionMessageCategory
+        ]
+    if eligible_recipient_count == 0:
+        return [
+            {'category': category.value, 'reason': 'no_eligible_recipients'}
+            for category in PredictionMessageCategory
+        ]
+
+    skipped: list[dict[str, str | int]] = []
+    undeliverable_qualifying_recipients = sum(
+        recipient.qualifying_delivery is not None
+        and recipient.qualifying_delivery.status
+        == PredictionMessageDeliveryStatus.undeliverable
+        for recipient in result.recipients
+    )
+    if undeliverable_qualifying_recipients:
+        skipped.append({
+            'category': PredictionMessageCategory.predictions.value,
+            'reason': 'recipient_undeliverable',
+            'recipient_count': undeliverable_qualifying_recipients,
+        })
+    return skipped
+
+
+def build_summary(
+    result: DailyPredictionBroadcastResult,
+    *,
+    audience_source: str,
+    eligible_recipient_count: int,
+) -> dict[str, Any]:
+    return {
+        'outcome': result.outcome.value,
+        'audience_source': audience_source,
+        'eligible_recipient_count': eligible_recipient_count,
+        'timezone': result.timezone_name,
+        'today': result.today.isoformat(),
+        'tomorrow': result.tomorrow.isoformat(),
+        'generation_identity': result.generation_identity,
+        'recipient_count': result.recipient_count,
+        'delivered_recipient_count': result.delivered_recipient_count,
+        'failed_recipient_count': result.failed_recipient_count,
+        'undeliverable_recipient_count': result.undeliverable_recipient_count,
+        'delivery_success_count': result.delivered_recipient_count,
+        'delivery_failure_count': (
+            result.failed_recipient_count
+            + result.undeliverable_recipient_count
+        ),
+        'delivery_categories': _delivery_diagnostics(result.recipients),
+        'skipped_categories': _skipped_categories(
+            result,
+            eligible_recipient_count,
+        ),
+        'error_summary': result.error_summary,
+        **_result_diagnostics(result.result),
+    }
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -103,26 +260,18 @@ async def run(args: argparse.Namespace) -> int:
             max_pages=args.max_pages,
         )
 
-    summary = {
-        'outcome': result.outcome.value,
-        'audience_source': audience_source,
-        'timezone': result.timezone_name,
-        'today': result.today.isoformat(),
-        'tomorrow': result.tomorrow.isoformat(),
-        'generation_identity': result.generation_identity,
-        'recipient_count': result.recipient_count,
-        'delivered_recipient_count': result.delivered_recipient_count,
-        'failed_recipient_count': result.failed_recipient_count,
-        'undeliverable_recipient_count': result.undeliverable_recipient_count,
-        'error_summary': result.error_summary,
-    }
+    summary = build_summary(
+        result,
+        audience_source=audience_source,
+        eligible_recipient_count=len(recipients),
+    )
     print(json.dumps(summary, sort_keys=True))
     return 0 if result.outcome.value in {'delivered', 'already_delivered'} else 1
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run(build_parser().parse_args()))
+    raise SystemExit(asyncio.run(run(build_parser().parse_args())))
 
 
 if __name__ == '__main__':

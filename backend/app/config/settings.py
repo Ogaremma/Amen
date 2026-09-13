@@ -48,6 +48,11 @@ class Settings(BaseSettings):
         validation_alias="SPORTYBET_UPCOMING_PATH",
     )
 
+    sportybet_upcoming_fallback_path: str = Field(
+        default="/api/ng/factsCenter/wapConfigurableEventsByOrder",
+        validation_alias="SPORTYBET_UPCOMING_FALLBACK_PATH",
+    )
+
     sportybet_football_sport_id: str = Field(
         default="sr:sport:1",
         validation_alias="SPORTYBET_FOOTBALL_SPORT_ID",
@@ -89,6 +94,15 @@ class Settings(BaseSettings):
             "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
         ),
         validation_alias="SPORTYBET_USER_AGENT",
+    )
+
+    sportybet_wap_user_agent: str = Field(
+        default=(
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
+        ),
+        validation_alias="SPORTYBET_WAP_USER_AGENT",
     )
 
     # ---------------------------------------------------------

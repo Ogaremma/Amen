@@ -69,6 +69,8 @@ services:
         value: /api/ng/orders/share
       - key: SPORTYBET_UPCOMING_PATH
         value: /api/ng/factsCenter/pcUpcomingEvents
+      - key: SPORTYBET_UPCOMING_FALLBACK_PATH
+        value: /api/ng/factsCenter/wapConfigurableEventsByOrder
       - key: SPORTYBET_FOOTBALL_SPORT_ID
         value: sr:sport:1
       - key: SPORTYBET_UPCOMING_MARKET_IDS
@@ -76,9 +78,11 @@ services:
       - key: SPORTYBET_UPCOMING_PAGE_SIZE
         value: "100"
       - key: SPORTYBET_UPCOMING_MAX_PAGES
-        value: "20"
+        value: "100"
       - key: SPORTYBET_TIMEOUT
         value: "20"
+      - key: SPORTYBET_WAP_USER_AGENT
+        value: "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
       - key: SPORTYBET_ACQUISITION_TTL_SECONDS
         value: "300"
 

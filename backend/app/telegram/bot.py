@@ -25,14 +25,14 @@ logger = logging.getLogger("amen.telegram.bot")
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
 WELCOME_TEXT = (
-    "🙏 <b>Welcome to Amen</b>\n\n"
+    "<b>Welcome to Amen</b>\n\n"
     "Amen helps you clean up your SportyBet booking codes — load a code, tick the "
     "games you don't want, and remove them all at once. SportyBet regenerates a "
     "fresh code and recalculates the odds for you.\n\n"
     "Tap the button below to open the app."
 )
 
-OPEN_BUTTON_TEXT = "🚀 Open Amen"
+OPEN_BUTTON_TEXT = "Open Amen"
 MENU_BUTTON_TEXT = "Open Amen"
 
 

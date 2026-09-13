@@ -163,6 +163,12 @@ def parse_upcoming_events_markets(payload: Any) -> SportyBetMarketCatalogPage:
         raise HTTPException(
             status_code=502, detail="Invalid SportyBet upcoming-events response"
         )
+    total_num = _to_int(data.get("totalNum"))
+    more_events = data.get("moreEvents")
+    if total_num is None and not isinstance(more_events, bool):
+        raise HTTPException(
+            status_code=502, detail="Invalid SportyBet upcoming-events response"
+        )
 
     fixtures: list[SportyBetFixtureWithMarkets] = []
     for tournament in data.get("tournaments", []):
@@ -174,9 +180,11 @@ def parse_upcoming_events_markets(payload: Any) -> SportyBetMarketCatalogPage:
                 fixtures.append(parsed)
 
     return SportyBetMarketCatalogPage(
-        total_num=_to_int(data.get("totalNum")) or 0,
+        total_num=total_num or 0,
         fixtures=fixtures,
         retrieved_num=len(fixtures),
+        complete=not (more_events is True),
+        more_events=more_events if isinstance(more_events, bool) else None,
     )
 
 

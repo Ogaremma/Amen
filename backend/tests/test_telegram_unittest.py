@@ -237,6 +237,19 @@ class TelegramAuthEndpointTests(unittest.TestCase):
 class BotPayloadTests(unittest.TestCase):
     WEBAPP_URL = "https://amen.example.com"
 
+    def test_start_message_and_button_are_emoji_free(self):
+        payload = build_start_message(555, self.WEBAPP_URL)
+        button = payload["reply_markup"]["inline_keyboard"][0][0]
+        emoji_ranges = (
+            range(0x1F000, 0x1FB00),
+            range(0x2600, 0x2800),
+            range(0x2B00, 0x2C00),
+        )
+        self.assertFalse(
+            any(ord(character) in emoji_range for character in payload["text"] for emoji_range in emoji_ranges)
+        )
+        self.assertEqual(button["text"], "Open Amen")
+
     def test_start_message_has_webapp_launch_button(self):
         payload = build_start_message(555, self.WEBAPP_URL)
         self.assertEqual(payload["chat_id"], 555)

@@ -4,6 +4,8 @@ import asyncio
 import logging
 import math
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, Callable
@@ -27,6 +29,9 @@ from app.services.sportybet_markets import (
 )
 
 logger = logging.getLogger("amen.sportybet")
+_upcoming_fallback_path: ContextVar[str | None] = ContextVar(
+    "sportybet_upcoming_fallback_path", default=None
+)
 
 settings = get_settings()
 
@@ -46,13 +51,14 @@ _AWAY_OUTCOME_ID = "3"
 
 
 class SportyBetUpcomingEventsResult:
-    def __init__(self, total_num: int, events: list[SportyBetEvent], pages_fetched: int = 1, *, retrieved_at: datetime | None = None, complete: bool = True, retrieved_num: int | None = None) -> None:
+    def __init__(self, total_num: int, events: list[SportyBetEvent], pages_fetched: int = 1, *, retrieved_at: datetime | None = None, complete: bool = True, retrieved_num: int | None = None, more_events: bool | None = None) -> None:
         self.total_num = total_num
         self.events = events
         self.pages_fetched = pages_fetched
         self.retrieved_at = retrieved_at or datetime.now(timezone.utc)
         self.complete = complete
         self.retrieved_num = len(events) if retrieved_num is None else retrieved_num
+        self.more_events = more_events
 
     def is_fresh(self, ttl_seconds: float, *, now: datetime | None = None) -> bool:
         current = now or datetime.now(timezone.utc)
@@ -166,6 +172,12 @@ def parse_upcoming_events_page(payload: Any) -> SportyBetUpcomingEventsResult:
         raise HTTPException(
             status_code=502, detail="Invalid SportyBet upcoming-events response"
         )
+    total_num = _to_int(data.get("totalNum"))
+    more_events = data.get("moreEvents")
+    if total_num is None and not isinstance(more_events, bool):
+        raise HTTPException(
+            status_code=502, detail="Invalid SportyBet upcoming-events response"
+        )
     events: list[SportyBetEvent] = []
     for tournament in data.get("tournaments", []):
         if not isinstance(tournament, dict):
@@ -174,23 +186,49 @@ def parse_upcoming_events_page(payload: Any) -> SportyBetUpcomingEventsResult:
             parsed = _parse_upcoming_event(raw)
             if parsed is not None:
                 events.append(parsed)
-    return SportyBetUpcomingEventsResult(_to_int(data.get("totalNum")) or 0, events)
+    return SportyBetUpcomingEventsResult(
+        total_num or 0,
+        events,
+        complete=not (more_events is True),
+        more_events=more_events if isinstance(more_events, bool) else None,
+    )
 
 
-def _upcoming_url() -> str:
-    return f"{settings.sportybet_base_url.rstrip('/')}/{settings.sportybet_upcoming_path.strip('/')}"
+def _upcoming_url(path: str | None = None) -> str:
+    upcoming_path = path or settings.sportybet_upcoming_path
+    return f"{settings.sportybet_base_url.rstrip('/')}/{upcoming_path.strip('/')}"
 
 
-async def _fetch_upcoming_page_payload(
+# Do not call endpoints in this predicate with an unvalidated user-supplied path;
+# it is only used to select the request shape for the configured fallback.
+def _is_wap_configurable_upcoming_path(path: str) -> bool:
+    return path.strip("/").endswith("factsCenter/wapConfigurableEventsByOrder")
+
+
+@contextmanager
+def _upcoming_fallback_context():
+    token = _upcoming_fallback_path.set(None)
+    try:
+        yield
+    finally:
+        _upcoming_fallback_path.reset(token)
+
+
+async def _fetch_upcoming_page_payload_from_path(
     page_num: int,
     page_size: int,
+    path: str,
 ) -> dict[str, Any]:
     max_attempts = 3
     backoff = 0.75
 
     for attempt in range(max_attempts):
         try:
-            response = await _request_upcoming_page(page_num, page_size)
+            response = (
+                await _request_upcoming_page(page_num, page_size)
+                if path == settings.sportybet_upcoming_path
+                else await _request_upcoming_page(page_num, page_size, path)
+            )
 
             if response.status_code == 200:
                 try:
@@ -215,7 +253,8 @@ async def _fetch_upcoming_page_payload(
                 return payload
 
             logger.warning(
-                "sportybet_upcoming_page_failed page=%s attempt=%s status=%s",
+                "sportybet_upcoming_page_failed endpoint=%s page=%s attempt=%s status=%s",
+                path,
                 page_num,
                 attempt + 1,
                 response.status_code,
@@ -245,6 +284,38 @@ async def _fetch_upcoming_page_payload(
     )
 
 
+async def _fetch_upcoming_page_payload(
+    page_num: int,
+    page_size: int,
+) -> dict[str, Any]:
+    active_fallback = _upcoming_fallback_path.get()
+    if active_fallback:
+        return await _fetch_upcoming_page_payload_from_path(
+            page_num, page_size, active_fallback
+        )
+
+    primary_path = settings.sportybet_upcoming_path
+    fallback_path = settings.sportybet_upcoming_fallback_path
+    try:
+        return await _fetch_upcoming_page_payload_from_path(
+            page_num, page_size, primary_path
+        )
+    except HTTPException as exc:
+        if not fallback_path or fallback_path.strip("/") == primary_path.strip("/"):
+            raise
+        _upcoming_fallback_path.set(fallback_path)
+        logger.warning(
+            "sportybet_upcoming_page_fallback page=%s primary=%s fallback=%s error=%s",
+            page_num,
+            primary_path,
+            fallback_path,
+            exc.detail,
+        )
+        return await _fetch_upcoming_page_payload_from_path(
+            page_num, page_size, fallback_path
+        )
+
+
 async def _fetch_upcoming_page(
     page_num: int,
     page_size: int,
@@ -266,19 +337,36 @@ async def _fetch_upcoming_market_page(
 async def _request_upcoming_page(
     page_num: int,
     page_size: int,
+    path: str | None = None,
 ) -> httpx.Response:
-    params = {
-        "sportId": settings.sportybet_football_sport_id,
-        "marketId": settings.sportybet_upcoming_market_ids,
-        "pageSize": page_size,
-        "pageNum": page_num,
-        "_t": int(time.time() * 1000),
-    }
+    request_path = path or settings.sportybet_upcoming_path
+    url = _upcoming_url(request_path)
 
     async with httpx.AsyncClient(timeout=settings.sportybet_timeout) as client:
+        if _is_wap_configurable_upcoming_path(request_path):
+            return await client.post(
+                url,
+                headers=_wap_headers(),
+                json={
+                    "productId": 3,
+                    "sportId": settings.sportybet_football_sport_id,
+                    "order": 0,
+                    "pageNum": page_num,
+                    "pageSize": page_size,
+                    "withTwoUpMarket": True,
+                    "withOneUpMarket": True,
+                },
+            )
+
         return await client.get(
-            _upcoming_url(),
-            params=params,
+            url,
+            params={
+                "sportId": settings.sportybet_football_sport_id,
+                "marketId": settings.sportybet_upcoming_market_ids,
+                "pageSize": page_size,
+                "pageNum": page_num,
+                "_t": int(time.time() * 1000),
+            },
             headers=_headers(),
         )
 
@@ -301,18 +389,28 @@ async def _collect_upcoming_catalog(
     pages_fetched = 0
     retrieved_num = 0
     complete = False
+    uses_more_events = False
     for page in range(1, limit + 1):
         result = await fetch_page(page, size)
         pages_fetched = page
         total_num = result.total_num
         results.append(result)
         retrieved_num += result.retrieved_num
+        more_events = getattr(result, "more_events", None)
+        if isinstance(more_events, bool):
+            uses_more_events = True
+            complete = not more_events
+            if complete or page == limit:
+                break
+            continue
         if result.retrieved_num == 0:
             complete = True
             break
         if page * size >= total_num:
             complete = True
             break
+    if uses_more_events and total_num == 0:
+        total_num = retrieved_num
     return results, total_num, pages_fetched, retrieved_num, complete
 
 
@@ -331,9 +429,10 @@ async def get_upcoming_football_events(
     if start and end and start > end:
         raise ValueError("start_datetime must not be after end_datetime")
 
-    results, total_num, pages_fetched, retrieved_num, complete = (
-        await _collect_upcoming_catalog(_fetch_upcoming_page, size, limit)
-    )
+    with _upcoming_fallback_context():
+        results, total_num, pages_fetched, retrieved_num, complete = (
+            await _collect_upcoming_catalog(_fetch_upcoming_page, size, limit)
+        )
     all_events = [event for result in results for event in result.events]
     filtered = [
         event
@@ -359,9 +458,10 @@ async def get_upcoming_football_market_fixtures(
     if start and end and start > end:
         raise ValueError("start_datetime must not be after end_datetime")
 
-    results, total_num, pages_fetched, retrieved_num, complete = (
-        await _collect_upcoming_catalog(_fetch_upcoming_market_page, size, limit)
-    )
+    with _upcoming_fallback_context():
+        results, total_num, pages_fetched, retrieved_num, complete = (
+            await _collect_upcoming_catalog(_fetch_upcoming_market_page, size, limit)
+        )
     all_fixtures = [
         fixture for result in results for fixture in result.fixtures
     ]
@@ -728,6 +828,26 @@ def _headers() -> dict[str, str]:
         "User-Agent": settings.sportybet_user_agent,
         "Origin": base,
         "Referer": f"{base}/",
+    }
+
+
+def _wap_headers() -> dict[str, str]:
+    base = settings.sportybet_base_url.rstrip("/")
+    return {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "Accept-Language": "en",
+        "Clientid": "wap",
+        "Operid": "2",
+        "Platform": "wap",
+        "User-Agent": settings.sportybet_wap_user_agent,
+        "Origin": base,
+        "Referer": (
+            f"{base}/ng/m/sport/football?time=all&source=sport_menu&sort=0"
+        ),
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "same-origin",
+        "Sec-Fetch-Site": "same-origin",
     }
 
 
