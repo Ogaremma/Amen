@@ -208,7 +208,7 @@ def build_summary(
     }
 
 
-async def run(args: argparse.Namespace) -> int:
+async def execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     settings = get_settings()
     if not settings.telegram_bot_token:
         raise SystemExit('TELEGRAM_BOT_TOKEN is required.')
@@ -265,8 +265,13 @@ async def run(args: argparse.Namespace) -> int:
         audience_source=audience_source,
         eligible_recipient_count=len(recipients),
     )
-    print(json.dumps(summary, sort_keys=True))
     return 0 if result.outcome.value in {'delivered', 'already_delivered'} else 1
+
+
+async def run(args: argparse.Namespace) -> int:
+    summary, exit_code = await execute(args)
+    print(json.dumps(summary, sort_keys=True))
+    return exit_code
 
 
 def main() -> None:
