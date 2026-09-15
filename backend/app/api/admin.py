@@ -20,7 +20,7 @@ class PredictionDailyRunRequest(BaseModel):
 
 
 def _verify_admin_token(authorization: str | None) -> None:
-    expected = get_settings().forebet_ingestion_token
+    expected = get_settings().prediction_daily_token
     supplied = authorization.removeprefix("Bearer ") if authorization else ""
     if not expected or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="Admin authentication required")

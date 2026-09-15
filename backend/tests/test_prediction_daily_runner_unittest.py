@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import unittest
+import ast
+from pathlib import Path
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest import mock
 
 from app.prediction_daily_runner import build_summary, main
+from app.services.prediction_daily import SportyBetEvidenceEvaluationProvider
+from app.services.sportybet import get_upcoming_football_market_fixtures
 from app.schemas.prediction_daily_broadcast import (
     DailyPredictionBroadcastResult,
     PredictionRecipientDeliveryResult,
@@ -103,6 +107,39 @@ def broadcast_result(
 
 
 class PredictionDailyRunnerSummaryTests(unittest.TestCase):
+    def test_daily_runner_defaults_to_sportybet_catalogue(self):
+        provider = SportyBetEvidenceEvaluationProvider(object())
+        self.assertIs(
+            provider.candidate_fetcher,
+            get_upcoming_football_market_fixtures,
+        )
+
+    def test_daily_runner_has_no_forebet_dependency(self):
+        source_path = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "prediction_daily_runner.py"
+        )
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn("forebet", source.lower())
+
+    def test_sportybet_service_has_no_module_level_forebet_import(self):
+        source_path = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "services"
+            / "sportybet.py"
+        )
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        module_imports = [
+            node.module
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith("app.schemas.forebet")
+        ]
+        self.assertEqual(module_imports, [])
+
     def test_successful_fan_out_reports_safe_counts(self):
         result = broadcast_result(
             outcome=DailyProductionDeliveryOutcome.delivered,

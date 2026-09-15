@@ -5,7 +5,7 @@
 Production uses a free-compatible architecture:
 
 - Render Free Web Service for the FastAPI backend and Telegram webhook.
-- Render Postgres for production persistence.
+- Neon PostgreSQL for production persistence.
 - GitHub Actions for the bounded daily prediction runner.
 
 `render.yaml` intentionally defines only the free Docker web service. Render Background Worker and Render Cron services are **not required** and must not be added for this deployment.
@@ -54,11 +54,9 @@ GitHub Actions runs this schedule through `.github/workflows/prediction-daily.ym
 
 Required GitHub Actions secrets are:
 
-- `DATABASE_URL`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_WEBAPP_URL`
+- `PREDICTION_DAILY_TOKEN`
 
-`DATABASE_URL` must be the externally reachable Render Postgres connection URL for the same `amen-postgres` database used by the web service. Render's internal-only database hostname is not reachable from GitHub-hosted runners.
+The workflow invokes the protected Render endpoint with the dedicated daily prediction bearer token. It does not connect to PostgreSQL and must not receive `DATABASE_URL`; the backend keeps that secret in Render only.
 
 The workflow explicitly supplies the same non-secret SportyBet production values used by the Render web service. It does not need `TELEGRAM_WEBHOOK_SECRET`, because the prediction runner sends Telegram messages but does not receive webhook updates.
 

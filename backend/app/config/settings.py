@@ -6,6 +6,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # ---------------------------------------------------------
+    # Admin
+    # ---------------------------------------------------------
+
+    prediction_daily_token: str | None = Field(
+        default=None,
+        validation_alias="PREDICTION_DAILY_TOKEN",
+    )
+
+    # ---------------------------------------------------------
     # Forebet
     # ---------------------------------------------------------
 

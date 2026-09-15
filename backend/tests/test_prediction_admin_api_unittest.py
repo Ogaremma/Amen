@@ -17,9 +17,40 @@ class PredictionDailyAdminApiTests(unittest.TestCase):
     def test_prediction_daily_admin_requires_authentication(self) -> None:
         with mock.patch(
             "app.api.admin.get_settings",
-            return_value=SimpleNamespace(forebet_ingestion_token="secret-token"),
+            return_value=SimpleNamespace(prediction_daily_token="secret-token"),
         ):
             response = self.client.post(self.url, json={})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"detail": "Admin authentication required"})
+
+    def test_prediction_daily_admin_rejects_wrong_token(self) -> None:
+        with mock.patch(
+            "app.api.admin.get_settings",
+            return_value=SimpleNamespace(prediction_daily_token="secret-token"),
+        ):
+            response = self.client.post(
+                self.url,
+                json={},
+                headers={"Authorization": "Bearer wrong-token"},
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"detail": "Admin authentication required"})
+
+    def test_prediction_daily_admin_does_not_accept_forebet_token(self) -> None:
+        with mock.patch(
+            "app.api.admin.get_settings",
+            return_value=SimpleNamespace(
+                prediction_daily_token="daily-token",
+                forebet_ingestion_token="forebet-token",
+            ),
+        ):
+            response = self.client.post(
+                self.url,
+                json={},
+                headers={"Authorization": "Bearer forebet-token"},
+            )
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json(), {"detail": "Admin authentication required"})
@@ -33,7 +64,7 @@ class PredictionDailyAdminApiTests(unittest.TestCase):
 
         with mock.patch(
             "app.api.admin.get_settings",
-            return_value=SimpleNamespace(forebet_ingestion_token="secret-token"),
+            return_value=SimpleNamespace(prediction_daily_token="secret-token"),
         ), mock.patch(
             "app.api.admin.execute_daily_prediction_runner",
             side_effect=execute,
@@ -53,7 +84,7 @@ class PredictionDailyAdminApiTests(unittest.TestCase):
 
         with mock.patch(
             "app.api.admin.get_settings",
-            return_value=SimpleNamespace(forebet_ingestion_token="secret-token"),
+            return_value=SimpleNamespace(prediction_daily_token="secret-token"),
         ), mock.patch(
             "app.api.admin.execute_daily_prediction_runner",
             side_effect=execute,
@@ -76,7 +107,7 @@ class PredictionDailyAdminApiTests(unittest.TestCase):
 
         with mock.patch(
             "app.api.admin.get_settings",
-            return_value=SimpleNamespace(forebet_ingestion_token="secret-token"),
+            return_value=SimpleNamespace(prediction_daily_token="secret-token"),
         ), mock.patch(
             "app.api.admin.execute_daily_prediction_runner",
             side_effect=execute,

@@ -12,6 +12,8 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: PREDICTION_DAILY_TOKEN
+        sync: false
       - key: FOREBET_INGESTION_TOKEN
         sync: false
       - key: TELEGRAM_BOT_TOKEN

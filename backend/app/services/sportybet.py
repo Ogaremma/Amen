@@ -16,12 +16,7 @@ from fastapi import HTTPException
 
 from app.config.settings import get_settings
 from app.schemas.booking import BookingResponse, BookingSelection
-from app.schemas.forebet import (
-    DrawBookingResponse,
-    FixtureMatchResult,
-    FixtureMatchStatus,
-    SportyBetEvent,
-)
+from app.schemas.sportybet import SportyBetEvent
 from app.schemas.sportybet_markets import OverOneHalfCandidate, SportyBetMarketCatalogPage
 from app.services.sportybet_markets import (
     extract_over_one_half_candidates,
@@ -1008,6 +1003,12 @@ def _draw_selection(event: SportyBetEvent) -> dict[str, Any]:
 async def create_draw_booking(
     fixtures: list[FixtureMatchResult],
 ) -> DrawBookingResponse:
+    from app.schemas.forebet import (
+        DrawBookingResponse,
+        FixtureMatchResult,
+        FixtureMatchStatus,
+    )
+
     if not fixtures:
         raise HTTPException(
             status_code=422, detail="At least one matched DRAW fixture is required"

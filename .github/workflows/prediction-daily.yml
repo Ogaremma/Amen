@@ -12,12 +12,12 @@ jobs:
     steps:
       - name: Run daily prediction runner on Render
         env:
-          FOREBET_INGESTION_TOKEN: ${{ secrets.FOREBET_INGESTION_TOKEN }}
+          PREDICTION_DAILY_TOKEN: ${{ secrets.PREDICTION_DAILY_TOKEN }}
         run: >
           curl --fail-with-body --silent --show-error
           --connect-timeout 120 --max-time 900
           --request POST
-          --header "Authorization: Bearer ${FOREBET_INGESTION_TOKEN}"
+          --header "Authorization: Bearer ${PREDICTION_DAILY_TOKEN}"
           --header "Content-Type: application/json"
           --data "{}"
           "https://amen-backend.onrender.com/api/v1/admin/prediction-daily/run"
